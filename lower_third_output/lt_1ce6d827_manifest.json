@@ -1,0 +1,28 @@
+{
+  "schema_version": "2.0",
+  "instance_id": "lt_1ce6d827",
+  "asset": "lower_third_output/lower_third.webm",
+  "format": "webm_rgba_vp9",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "fps": 30,
+  "duration_ms": 40000,
+  "timecode_in": null,
+  "timecode_out": null,
+  "loop": true,
+  "qc": {
+    "passed": false,
+    "warnings": [
+      "Frame 0: luma out of range [0, 254] (allowed 16\u2013235)",
+      "Frame 300: luma out of range [0, 255] (allowed 16\u2013235)",
+      "Frame 600: luma out of range [0, 255] (allowed 16\u2013235)",
+      "Frame 900: luma out of range [0, 255] (allowed 16\u2013235)",
+      "Frame 1199: luma out of range [0, 255] (allowed 16\u2013235)"
+    ],
+    "min_contrast_ratio": 12.45
+  },
+  "ffmpeg_overlay": "overlay=0:0:format=auto:enable='between(t,{IN},{OUT})'",
+  "color_space": "bt709"
+}

@@ -93,7 +93,7 @@ def draw_frame(state: DrawState, out_path: Path) -> None:
 
             if repeat_content:
                 layout.text = content
-                text_w = layout.get_pixel_size()[0]
+                text_w = layout.get_size()[0] / _PANGO_SCALE
                 if text_w > 0:
                     repeat_count = math.ceil((_CANVAS_W + text_w) / text_w) + 1
                 else:

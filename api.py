@@ -2,6 +2,9 @@ import asyncio
 import json
 import logging
 import shutil
+
+from dotenv import load_dotenv
+load_dotenv()  # loads .env from project root → makes GROQ_API_KEY available
 from dataclasses import asdict
 from pathlib import Path
 
