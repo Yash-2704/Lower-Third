@@ -44,3 +44,8 @@ coverage/
 
 # Logs
 *.log
+
+# Generated output (frames, videos, manifests)
+lower_third_output/
+output/
+cache/
