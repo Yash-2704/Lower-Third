@@ -93,6 +93,9 @@ def draw_frame(state: DrawState, out_path: Path) -> None:
 
 def render_frames(state_iter, output_dir: Path, fps: int = 30) -> Path:
     frames_dir = output_dir / "frames"
+    if frames_dir.exists():
+        for old in frames_dir.glob("frame_*.png"):
+            old.unlink()
     frames_dir.mkdir(parents=True, exist_ok=True)
     for i, state in state_iter:
         draw_frame(state, frames_dir / f"frame_{i:06d}.png")

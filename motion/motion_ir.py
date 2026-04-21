@@ -83,6 +83,7 @@ class ElementDef(BaseModel):
     fill: str = "#000000"
     font_size: int | None = None
     font_weight: Literal["regular", "bold"] = "regular"
+    font_family: str = "Noto Sans"
     clip_x: float | None = None
     clip_y: float | None = None
     clip_w: float | None = None
@@ -117,4 +118,17 @@ class MotionIR(BaseModel):
         for element in self.elements:
             if element.clip_to is not None and element.clip_to not in known_ids:
                 raise ValueError(f"Element clip_to references unknown element_id: {element.clip_to}")
+        return self
+
+    @model_validator(mode="after")
+    def validate_track_uniqueness(self) -> "MotionIR":
+        seen = {}
+        for track in self.tracks:
+            key = (track.element_id, track.property)
+            if key in seen:
+                raise ValueError(
+                    f"Duplicate track: element '{track.element_id}' property "
+                    f"'{track.property}'. Combine into one track with all keyframes."
+                )
+            seen[key] = True
         return self

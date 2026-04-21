@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(echo 'export DYLD_LIBRARY_PATH=\"/opt/homebrew/lib:$DYLD_LIBRARY_PATH\"')",
-      "Read(//Users/yashaggarwal/**)"
+      "Read(//Users/yashaggarwal/**)",
+      "Bash(.venv/bin/pytest tests/test_geometry_corrector.py -v)",
+      "Bash(.venv/bin/pytest tests/ -v --tb=short)",
+      "Bash(.venv/bin/pytest tests/ --tb=short)"
     ]
   }
 }

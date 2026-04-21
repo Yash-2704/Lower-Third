@@ -13,9 +13,21 @@ FONT SIZES: headline={font_size_headline}px  kicker={font_size_kicker}px  name={
 ELEMENT TYPES: rect and text only.
 Every element needs a unique id string.
 text elements that should be invisible outside the bar must set clip_to to the bar element's id.
-For sliding text (entering from below): start y = bar_y + bar_h (just below visible area).
-For sliding text (entering from above): start y = bar_y - font_size (just above visible area).
 For text centred vertically in the bar: y = bar_y + bar_padding_top + font_size.
+
+For text entering from BELOW the bar (slide-up entry):
+  initial y = bar_y + bar_h + 60  (NOT bar_y + bar_h + 5)
+  This ensures the full glyph including descenders is hidden below the clip boundary.
+
+For text exiting ABOVE the bar (slide-up exit):
+  final y = bar_y - (font_size * 2) - 60  (NOT bar_y - font_size)
+  This ensures the full glyph including ascenders clears the clip boundary top edge.
+
+For text entering from ABOVE the bar (slide-down entry):
+  initial y = bar_y - (font_size * 2) - 60
+
+For text exiting BELOW the bar:
+  final y = bar_y + bar_h + 60
 repeat_content = true only for continuous ticker scroll (text_x_offset track).
 
 PROPERTIES YOU MAY ANIMATE:
@@ -38,11 +50,39 @@ EASING OPTIONS (set on each keyframe's easing.type):
   cubic_bezier — set bezier_points: [x1, y1, x2, y2]
 Good defaults: entries use ease_out_cubic. Exits use ease_in_cubic. Crawls use linear.
 
-LOOP:
-  enabled: true/false
-  type: "restart" (replay from start) or "ping_pong" (forward then backward)
-  loop_after_ms: milliseconds after which loop restarts (omit to loop after total_ms)
-  count: 0 means infinite
+LOOP RULES — READ CAREFULLY:
+  enabled: true when user asks for looping, continuous, or repeating
+  count: 0 means infinite (almost always what you want)
+  type: "restart" for text animations. NEVER use "ping_pong" for text.
+  loop_after_ms: duration of ONE animation cycle in milliseconds.
+    Compute it as: start_offset_ms of last animated element + last keyframe t_ms of that element.
+    Example: second element starts at start_offset_ms=5800, its last keyframe is at t_ms=5800
+             → loop_after_ms = 11600
+    This is the point where the animation resets back to the beginning.
+  total_ms: the full video duration in milliseconds.
+    When looping is enabled, total_ms should be the desired video length (e.g. 30000 for 30 seconds).
+    total_ms MUST be >= loop_after_ms. The engine will repeat the loop_after_ms cycle
+    automatically to fill the total duration — do NOT make them equal.
+    If the user specifies no duration, default total_ms to 3600000 (60 minutes).
+    This ensures an infinite-loop video never silently ends mid-broadcast.
+    NEVER set total_ms equal to loop_after_ms when loop is enabled — that produces a single cycle with no repeat.
+
+TRACK UNIQUENESS RULE:
+Each (element_id, property) combination may appear in at most ONE track.
+If an element needs both entry and exit animations on the same property (e.g. y),
+put ALL keyframes for that property in a single track with the correct t_ms values.
+
+WRONG — two separate y tracks for the same element:
+  {{"element_id": "h1", "property": "y", "start_offset_ms": 0, "keyframes": [entry kfs]}}
+  {{"element_id": "h1", "property": "y", "start_offset_ms": 5800, "keyframes": [exit kfs]}}
+
+CORRECT — one y track with all keyframes in sequence:
+  {{"element_id": "h1", "property": "y", "start_offset_ms": 0, "keyframes": [
+    {{"t_ms": 0,    "value": BELOW,  "easing": {{"type": "ease_out_cubic"}}}},
+    {{"t_ms": 400,  "value": CENTER}},
+    {{"t_ms": 5400, "value": CENTER, "easing": {{"type": "ease_in_cubic"}}}},
+    {{"t_ms": 5800, "value": ABOVE}}
+  ]}}
 
 NEVER GENERATE:
   3D transforms or perspective effects
@@ -69,6 +109,10 @@ OUTPUT SCHEMA:
 }}
 Do not include instance_id or schema_version — these are set by the system.
 
+CRITICAL: The examples below show structure only.
+NEVER copy the <<USER_HEADLINE_X>> placeholder text into your output.
+Always use the EXACT words from the user's prompt.
+
 EXAMPLE 1 — Rotating two headlines (slide-up entry, 5s hold, slide-up exit, infinite loop):
 
 Geometry reference for this canvas:
@@ -86,8 +130,8 @@ Geometry reference for this canvas:
   "motion": {{
     "elements": [
       {{"id": "bar", "type": "rect", "x": 0, "y": {bar_y}, "w": {canvas_w}, "h": {bar_h}, "fill": "{bar_color}"}},
-      {{"id": "h1", "type": "text", "content": "First headline here", "x": {bar_padding_left}, "y": {bar_y}, "fill": "{text_color}", "font_size": {font_size_headline}, "clip_to": "bar"}},
-      {{"id": "h2", "type": "text", "content": "Second headline here", "x": {bar_padding_left}, "y": {bar_y}, "fill": "{text_color}", "font_size": {font_size_headline}, "clip_to": "bar"}}
+      {{"id": "h1", "type": "text", "content": "<<USER_HEADLINE_1>>", "x": {bar_padding_left}, "y": {bar_y}, "fill": "{text_color}", "font_size": {font_size_headline}, "clip_to": "bar"}},
+      {{"id": "h2", "type": "text", "content": "<<USER_HEADLINE_2>>", "x": {bar_padding_left}, "y": {bar_y}, "fill": "{text_color}", "font_size": {font_size_headline}, "clip_to": "bar"}}
     ],
     "tracks": [
       {{"element_id": "h1", "property": "y", "start_offset_ms": 0,
@@ -106,7 +150,7 @@ Geometry reference for this canvas:
        ]}}
     ],
     "loop": {{"enabled": true, "count": 0, "type": "restart", "loop_after_ms": 11600}},
-    "total_ms": 11600
+    "total_ms": 3600000
   }}
 }}
 

@@ -57,44 +57,46 @@ def validate(webm_path: Path, spec: LowerThirdSpec, project_fps: int = 30) -> QC
             )
             fps_ok = False
 
+    # Luma check — sample 5 evenly spaced frames
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if total > 0:
-        indices = [
-            0,
-            total // 4,
-            total // 2,
-            3 * total // 4,
-            total - 1,
-        ]
-        for idx in indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                continue
+    luma_min = broadcast_luma_min
+    luma_max = broadcast_luma_max
 
-            if frame.ndim == 3 and frame.shape[2] == 4:
-                alpha = frame[:, :, 3]
-                mask = alpha > 10
-                bgr = frame[:, :, :3]
-                gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-                if mask.any():
-                    region = gray[mask]
-                    lo, hi = int(region.min()), int(region.max())
-                    if lo < broadcast_luma_min or hi > broadcast_luma_max:
-                        warnings.append(
-                            f"Frame {idx}: luma out of range [{lo}, {hi}] "
-                            f"(allowed {broadcast_luma_min}–{broadcast_luma_max})"
-                        )
-                        luma_ok = False
-            else:
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-                lo, hi = int(gray.min()), int(gray.max())
-                if lo < broadcast_luma_min or hi > broadcast_luma_max:
-                    warnings.append(
-                        f"Frame {idx}: luma out of range [{lo}, {hi}] "
-                        f"(allowed {broadcast_luma_min}–{broadcast_luma_max})"
-                    )
-                    luma_ok = False
+    sample_indices = [0, total // 4, total // 2, 3 * total // 4, max(0, total - 1)]
+
+    for frame_idx in sample_indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            continue
+
+        # Convert to grayscale (works on both BGR and BGRA frames)
+        if frame.ndim == 3 and frame.shape[2] == 4:
+            # BGRA — mask out fully transparent pixels
+            alpha = frame[:, :, 3]
+            bgr   = frame[:, :, :3]
+            gray  = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            # Only measure pixels where alpha > 10 (not transparent background)
+            mask  = alpha > 10
+        else:
+            # BGR — exclude pure black pixels (transparent background in VP9)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # Exclude pixels that are all-zero across all channels (transparent bg)
+            mask = np.any(frame > 0, axis=2)
+
+        if not mask.any():
+            # Fully transparent frame — skip, not a luma violation
+            continue
+
+        lo = int(gray[mask].min())
+        hi = int(gray[mask].max())
+
+        if lo < luma_min or hi > luma_max:
+            warnings.append(
+                f"Frame {frame_idx}: luma out of range [{lo}, {hi}] "
+                f"(allowed {luma_min}–{luma_max})"
+            )
+            luma_ok = False
 
     cap.release()
 

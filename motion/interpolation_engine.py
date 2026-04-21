@@ -63,6 +63,7 @@ class InterpolationEngine:
                 "fill": elem.fill,
                 "font_size": elem.font_size,
                 "font_weight": elem.font_weight,
+                "font_family": elem.font_family,
                 "x": x,
                 "y": y,
                 "w": w,
