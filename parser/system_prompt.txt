@@ -99,6 +99,17 @@ NEVER GENERATE:
   Bezier path motion (elements move in straight lines between keyframes)
   A full-canvas background rect (w={canvas_w}, h={canvas_h}). The canvas is transparent; only generate rects that are explicitly part of the lower-third design.
   In multi-element designs that include a badge + label + scroll_bar (the Example 3 pattern), do NOT also add an extra full-width "bar" rect spanning the entire lower-third height. The badge, label, and scroll_bar already define all visual zones; an extra bar rect creates unwanted visual bands.
+  Never generate a full-width background rect that fills the entire lower third zone. The canvas background is transparent. Only generate rects that are explicitly described in the user's request. If the user asks for a 600px wide blue bar, generate exactly that — not a 1920px dark rect behind it.
+
+ALIGNMENT RULE: When a circle badge and a label bar sit in the same row, the label bar x must be 0 (left edge of canvas). The circle overlaps the bar from the front. Do NOT set the label bar x to the circle width. The bar starts at x=0 and the circle sits on top of it visually.
+
+CIRCLE BADGE RULE: A circle badge in the lower third must be fully visible within the canvas.
+Use these values for a standard lower third circle badge:
+  cx = 60         (flush to left edge, radius=60)
+  cy = {bar_y_mid}    (vertically centred across full lower third height of 120px)
+  rx = 60
+  ry = 60
+Never place a circle badge with cy > 1050 — it will be clipped by the canvas bottom edge.
 
 SHAPES — for circular or decorative badges use type="path" with shape_intent:
   Supported kinds: circle, ellipse, triangle, diamond, star, pill, chevron, pentagon, hexagon
@@ -106,7 +117,7 @@ SHAPES — for circular or decorative badges use type="path" with shape_intent:
   cx/cy are the centre of the shape in canvas pixels. rx/ry are the half-widths.
   NEVER set the `d` field — it is computed automatically by the shape resolver.
   Example circle badge: {{"id": "badge", "type": "path",
-    "shape_intent": {{"kind": "circle", "cx": 50, "cy": 1030, "rx": 50, "ry": 50}},
+    "shape_intent": {{"kind": "circle", "cx": 60, "cy": {bar_y_mid}, "rx": 60, "ry": 60}},
     "fill": "#1A3A8F", "opacity": 1.0}}
 
 GRADIENTS — for a smooth colour transition across a rect or path element add a gradient object:
@@ -215,6 +226,14 @@ The endpoint value will be replaced — its magnitude does not
 matter, only its sign (must be negative for left-scroll).
 Never omit the text_x_offset track for ticker elements.
 
+TWO-ROW TICKER LAYOUT — when the design has a label/headline bar ABOVE a scrolling ticker row:
+  Label row  : x=0, y={bar_y},        w={canvas_w}, h={bar_half_h}
+  Ticker row : x=0, y={bar_y_lower},  w={canvas_w}, h={bar_half_h}
+  The ticker background rect MUST use y={bar_y_lower}, NOT y={bar_y}.
+  The ticker text clip_to MUST reference the ticker row rect (the one at y={bar_y_lower}).
+  NEVER place the ticker row rect at the same y as the label row rect.
+  Each row is {bar_half_h}px tall. The two rows together fill the full bar zone.
+
 EXAMPLE 2 — Continuous ticker crawl (two statements, infinite loop):
 
 {{
@@ -264,7 +283,7 @@ Layout:
     "elements": [
       {{
         "id": "label", "type": "rect",
-        "x": 105, "y": {bar_y}, "w": 400, "h": {bar_half_h},
+        "x": 0, "y": {bar_y}, "w": 400, "h": {bar_half_h},
         "gradient": {{"start_color": "#2A6FDF", "end_color": "#0A2480", "angle_deg": 0}}
       }},
       {{
@@ -297,7 +316,7 @@ Layout:
       }},
       {{
         "id": "badge", "type": "path",
-        "shape_intent": {{"kind": "circle", "cx": 50, "cy": {bar_y_mid}, "rx": 50, "ry": 50}},
+        "shape_intent": {{"kind": "circle", "cx": 60, "cy": {bar_y_mid}, "rx": 60, "ry": 60}},
         "fill": "#1A3A8F", "opacity": 1.0
       }},
       {{

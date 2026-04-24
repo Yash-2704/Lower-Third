@@ -70,10 +70,6 @@ def generate_lower_third(
         except (ImportError, Exception) as e:
             log.warning("TTS anchor skipped: %s", e)
 
-    # Step 3c — Shape resolver (converts shape_intent → SVG path d string)
-    spec.motion = resolve_shapes(spec.motion)
-    log.info("Shape resolver applied")
-
     # Step 5 — Cache check
     cached_path = cache_hit(spec)
     _progress("cache_check")
@@ -96,10 +92,13 @@ def generate_lower_third(
         return {"video_path": video_path, "manifest": manifest,
                 "qc_report": qc_report, "cache_hit": True}
 
-    # Step 5b — Geometric corrections
+    # Step 5b — Geometric corrections then shape resolver
+    # Shape resolver runs AFTER corrections so corrected shape_intent produces correct path d.
     log.info("Applying geometric corrections")
     spec.motion = apply_geometric_corrections(spec.motion, brand)
     log.info("Geometric corrections applied")
+    spec.motion = resolve_shapes(spec.motion)
+    log.info("Shape resolver applied")
 
     # Step 5c — Ticker width correction (must run after geometry, before render)
     spec.motion = correct_ticker_widths(spec.motion)

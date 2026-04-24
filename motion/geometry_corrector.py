@@ -33,7 +33,9 @@ PLACEHOLDER_PATTERNS = [
 
 def apply_geometric_corrections(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
     ir = _fix_clip_boundaries(ir, brand)
-    ir = _fix_clip_target_dimensions(ir, brand)  # ensure clip rects have non-zero h
+    ir = _fix_clip_target_dimensions(ir, brand)    # ensure clip rects have non-zero h
+    ir = _fix_circle_badge_position(ir, brand)     # guard circle cy/cx before ticker injection
+    ir = _fix_ticker_row_position(ir, brand)       # correct ticker rect y before scroll-bar injection
     ir = _ensure_ticker_scroll_bar(ir, brand)   # must run before draw-order sort
     ir = _fix_timing_consistency(ir)
     ir = _fix_track_uniqueness(ir)
@@ -47,7 +49,7 @@ _TICKER_DARK_FILL  = "#1A1A3A"
 _SCROLL_BAR_FILL   = "#FFFFFF"
 _SCROLL_BAR_ID     = "scroll_bar"
 _UPPER_BAR_ID      = "upper_bar_bg"
-_BADGE_WIDTH       = 100.0   # badge cx=50, rx=50 → right edge at x=100
+_BADGE_WIDTH       = 120.0   # badge cx=60, rx=60 → right edge at x=120
 
 
 def _is_light_color(hex_color: str) -> bool:
@@ -59,6 +61,94 @@ def _is_light_color(hex_color: str) -> bool:
         return (0.299 * r + 0.587 * g + 0.114 * b) > 128
     except (ValueError, AttributeError, IndexError):
         return False
+
+
+def _fix_circle_badge_position(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
+    """Ensure circle badge path elements are fully within the canvas and
+    vertically centred in the lower third zone."""
+    corrected = []
+    for el in ir.elements:
+        if el.type == "path" and el.shape_intent is not None:
+            intent = el.shape_intent
+            if intent.kind.value in ("circle", "ellipse"):
+                expected_cy = brand.bar_y + brand.bar_h // 2
+                expected_cx = intent.rx  # flush left: cx = rx
+                max_cy = brand.canvas_h - intent.ry - 2
+                corrected_cy = min(expected_cy, max_cy)
+                if abs(intent.cy - corrected_cy) > 5:
+                    log.info(
+                        "Correcting circle cy: %d → %d",
+                        intent.cy, corrected_cy,
+                    )
+                    new_intent = intent.model_copy(
+                        update={"cy": corrected_cy, "cx": expected_cx}
+                    )
+                    el = el.model_copy(
+                        update={"shape_intent": new_intent, "d": None}
+                    )
+        corrected.append(el)
+    return ir.model_copy(update={"elements": corrected})
+
+
+def _fix_ticker_row_position(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
+    """Move a misplaced ticker background rect from the upper bar row to the lower row.
+
+    When the LLM places the ticker clip rect at bar_y instead of bar_y+bar_h//2,
+    the white ticker rect overlaps the coloured label bar creating a white streak.
+    This corrector repositions it before _ensure_ticker_scroll_bar runs so that
+    the scroll-bar injection can find and normalise it rather than orphaning the
+    misplaced rect.
+    """
+    ticker_elements = [
+        el for el in ir.elements
+        if el.type == "text" and (
+            (el.ticker_items and len(el.ticker_items) > 0) or el.repeat_content
+        )
+    ]
+    if not ticker_elements:
+        return ir
+
+    scroll_y = float(brand.bar_y + brand.bar_h // 2)
+    element_map = {el.id: el for el in ir.elements}
+    new_elements = list(ir.elements)
+
+    for ticker_el in ticker_elements:
+        if not ticker_el.clip_to:
+            continue
+        ticker_rect = element_map.get(ticker_el.clip_to)
+        if ticker_rect is None or ticker_rect.type != "rect":
+            continue
+        # Already in or below the lower row — nothing to fix.
+        if float(ticker_rect.y or 0) >= scroll_y - 5:
+            continue
+        # Full-height bar: leave it for _ensure_ticker_scroll_bar to handle.
+        if float(ticker_rect.h or 0) > brand.bar_h // 2 + 5:
+            continue
+
+        # Label row rect: the topmost non-ticker rect in the bar zone.
+        bar_rects = [
+            el for el in ir.elements
+            if el.type == "rect"
+            and el.id != ticker_rect.id
+            and el.y is not None
+            and brand.bar_y - 5 <= float(el.y) < brand.bar_y + brand.bar_h
+        ]
+        if not bar_rects:
+            continue
+
+        label_rect = min(bar_rects, key=lambda el: float(el.y))
+        if float(ticker_rect.y or 0) <= float(label_rect.y or 0):
+            old_y = float(ticker_rect.y or 0)
+            new_y = float(label_rect.y or 0) + float(label_rect.h or brand.bar_h // 2)
+            log.info(
+                "Corrected ticker rect '%s' y from %.0f to %.0f",
+                ticker_rect.id, old_y, new_y,
+            )
+            fixed = ticker_rect.model_copy(update={"y": new_y})
+            new_elements = [fixed if e.id == ticker_rect.id else e for e in new_elements]
+            element_map = {el.id: el for el in new_elements}
+
+    return ir.model_copy(update={"elements": new_elements})
 
 
 def _ensure_ticker_scroll_bar(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
@@ -148,7 +238,6 @@ def _ensure_ticker_scroll_bar(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
         and e.id != _SCROLL_BAR_ID
         and e.y is not None
         and abs(float(e.y) - upper_y) <= 5
-        and (e.w or 0) >= upper_w * 0.9   # covers ≥90% of expected width
         for e in new_elements
     )
     if not has_upper_bg:
@@ -156,14 +245,32 @@ def _ensure_ticker_scroll_bar(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
             id=_UPPER_BAR_ID, type="rect",
             x=_BADGE_WIDTH, y=upper_y,
             w=upper_w, h=upper_h,
-            fill=_TICKER_DARK_FILL, opacity=1.0,
+            fill=brand.bar_color, opacity=1.0,
         )
         # Insert at position 0 so it paints behind everything else
         new_elements = [upper_bg] + new_elements
         log.info(
-            "Injected upper_bar_bg at x=%.0f y=%.0f w=%.0f h=%.0f",
-            _BADGE_WIDTH, upper_y, upper_w, upper_h,
+            "Injected upper_bar_bg at x=%.0f y=%.0f w=%.0f h=%.0f fill=%s",
+            _BADGE_WIDTH, upper_y, upper_w, upper_h, brand.bar_color,
         )
+    else:
+        # A full-width rect covers the upper row — trim any full-height bar to
+        # upper_h so the white scroll_bar renders cleanly in the lower half
+        # without creating a visible white stripe through the coloured rect.
+        for i, el in enumerate(new_elements):
+            if (
+                el.type == "rect"
+                and el.id != _SCROLL_BAR_ID
+                and el.y is not None
+                and abs(float(el.y) - upper_y) <= 5
+                and (el.w or 0) >= upper_w * 0.9
+                and (el.h or 0) > upper_h + 5
+            ):
+                log.info(
+                    "Trimmed '%s' h: %.0f → %.0f (upper half only, scroll_bar owns lower half)",
+                    el.id, el.h, upper_h,
+                )
+                new_elements[i] = el.model_copy(update={"h": upper_h})
 
     # Wire every ticker element to the (now-guaranteed) scroll_bar.
     scroll_bar_top_y = scroll_y + brand.bar_padding_top  # text TOP within scroll_bar
