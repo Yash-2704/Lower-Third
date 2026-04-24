@@ -245,6 +245,27 @@ def test_pipeline_validate_called_with_video_path():
         mocks["validate"].assert_called_once()
 
 
+def test_write_manifest_timecodes_when_provided():
+    from lower_third.output.manifest_writer import write_manifest
+    spec = _minimal_spec()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = write_manifest(
+            spec, Path(tmpdir) / "lt.webm", _good_qc(), Path(tmpdir),
+            timecode_in="00:04:32:12",
+            timecode_out="00:04:40:12",
+        )
+    assert result["timecode_in"]  == "00:04:32:12"
+    assert result["timecode_out"] == "00:04:40:12"
+
+
+def test_write_manifest_qc_section_has_loop_seamless():
+    from lower_third.output.manifest_writer import write_manifest
+    spec = _minimal_spec()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = write_manifest(spec, Path(tmpdir) / "lt.webm", _good_qc(), Path(tmpdir))
+    assert "loop_seamless" in result["qc"]
+
+
 # ── True end-to-end (mocked LLM only) ────────────────────────────────────────
 
 def test_end_to_end_pipeline_writes_manifest_to_disk():

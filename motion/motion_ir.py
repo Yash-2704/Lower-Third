@@ -6,6 +6,67 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+class GradientDef(BaseModel):
+    start_color: str
+    end_color: str
+    angle_deg: float = 0.0
+
+    @field_validator("start_color", "end_color")
+    @classmethod
+    def color_must_be_hex(cls, v: str) -> str:
+        if len(v) != 7 or v[0] != "#" or not all(c in "0123456789ABCDEFabcdef" for c in v[1:]):
+            raise ValueError("color must be a 7-character hex string starting with '#'")
+        return v
+
+
+class TickerItem(BaseModel):
+    text: str
+    pause_after_ms: int = 0
+
+
+class ShapeKind(str, Enum):
+    circle = "circle"
+    ellipse = "ellipse"
+    triangle = "triangle"
+    diamond = "diamond"
+    star = "star"
+    pill = "pill"
+    chevron = "chevron"
+    pentagon = "pentagon"
+    hexagon = "hexagon"
+
+
+class ShapeIntent(BaseModel):
+    kind: ShapeKind
+    cx: float
+    cy: float
+    rx: float
+    ry: float
+    points: int = 5
+    corner_r: float = 0.0
+
+    @field_validator("rx", "ry")
+    @classmethod
+    def radius_must_be_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("rx and ry must be > 0")
+        return v
+
+    @field_validator("points")
+    @classmethod
+    def points_must_be_gte_three(cls, v: int) -> int:
+        if v < 3:
+            raise ValueError("points must be >= 3")
+        return v
+
+    @field_validator("corner_r")
+    @classmethod
+    def corner_r_must_be_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("corner_r must be >= 0")
+        return v
+
+
 class EasingType(str, Enum):
     linear = "linear"
     ease_in = "ease_in"
@@ -68,7 +129,7 @@ class LoopConfig(BaseModel):
 
 class ElementDef(BaseModel):
     id: str
-    type: Literal["rect", "text"]
+    type: Literal["rect", "text", "path"]
     content: str | None = None
     clip_to: str | None = None
     repeat_content: bool = False
@@ -88,6 +149,10 @@ class ElementDef(BaseModel):
     clip_y: float | None = None
     clip_w: float | None = None
     clip_h: float | None = None
+    shape_intent: ShapeIntent | None = None
+    d: str | None = None
+    gradient: GradientDef | None = None
+    ticker_items: list[TickerItem] | None = None
 
     @field_validator("fill")
     @classmethod
@@ -95,6 +160,14 @@ class ElementDef(BaseModel):
         if len(v) != 7 or v[0] != "#" or not all(c in "0123456789ABCDEFabcdef" for c in v[1:]):
             raise ValueError("fill must be a 7-character hex string starting with '#'")
         return v
+
+    @model_validator(mode="after")
+    def validate_path_fields(self) -> "ElementDef":
+        if self.type == "path" and self.shape_intent is None and self.d is None:
+            raise ValueError("path element requires either shape_intent or d")
+        if self.type != "path" and self.shape_intent is not None:
+            raise ValueError("shape_intent is only valid on type='path' elements")
+        return self
 
 
 class MotionIR(BaseModel):

@@ -10,21 +10,25 @@ BAR: x=0, y={bar_y}, w={canvas_w}, h={bar_h}
 PADDING: left={bar_padding_left}px from bar left edge, top={bar_padding_top}px from bar top edge
 FONT SIZES: headline={font_size_headline}px  kicker={font_size_kicker}px  name={font_size_name}px  title={font_size_title}px
 
-ELEMENT TYPES: rect and text only.
+ELEMENT TYPES: rect, text, and path.
 Every element needs a unique id string.
 text elements that should be invisible outside the bar must set clip_to to the bar element's id.
-For text centred vertically in the bar: y = bar_y + bar_padding_top + font_size.
+DRAW ORDER: elements are painted in array order — first element is the bottommost layer, last element is on top.
+  Always place background rects first, then text/labels, then any overlay badge or circle LAST so it is not hidden by other elements.
+y is the TOP of the text bounding box (Cairo/Pango draws from upper-left, NOT from baseline).
+For text centred vertically in the bar: y = bar_y + bar_padding_top.
+  (Do NOT add font_size — that moves text below the visible area.)
 
 For text entering from BELOW the bar (slide-up entry):
   initial y = bar_y + bar_h + 60  (NOT bar_y + bar_h + 5)
   This ensures the full glyph including descenders is hidden below the clip boundary.
 
 For text exiting ABOVE the bar (slide-up exit):
-  final y = bar_y - (font_size * 2) - 60  (NOT bar_y - font_size)
-  This ensures the full glyph including ascenders clears the clip boundary top edge.
+  final y = bar_y - font_size - bar_padding_top
+  This ensures the full glyph clears the clip boundary top edge.
 
 For text entering from ABOVE the bar (slide-down entry):
-  initial y = bar_y - (font_size * 2) - 60
+  initial y = bar_y - font_size - bar_padding_top
 
 For text exiting BELOW the bar:
   final y = bar_y + bar_h + 60
@@ -89,8 +93,45 @@ NEVER GENERATE:
   Blur, glow, shadow, or particle effects
   Image or video textures
   Per-character colour changes within one text element
-  Element types other than rect and text
+  Element types other than rect, text, and path.
+  Never set the `d` field — it is computed by the system.
+  Never write raw SVG coordinates.
   Bezier path motion (elements move in straight lines between keyframes)
+  A full-canvas background rect (w={canvas_w}, h={canvas_h}). The canvas is transparent; only generate rects that are explicitly part of the lower-third design.
+  In multi-element designs that include a badge + label + scroll_bar (the Example 3 pattern), do NOT also add an extra full-width "bar" rect spanning the entire lower-third height. The badge, label, and scroll_bar already define all visual zones; an extra bar rect creates unwanted visual bands.
+
+SHAPES — for circular or decorative badges use type="path" with shape_intent:
+  Supported kinds: circle, ellipse, triangle, diamond, star, pill, chevron, pentagon, hexagon
+  shape_intent fields: kind (required), cx, cy, rx, ry (all required), points (star only), corner_r (pill only)
+  cx/cy are the centre of the shape in canvas pixels. rx/ry are the half-widths.
+  NEVER set the `d` field — it is computed automatically by the shape resolver.
+  Example circle badge: {{"id": "badge", "type": "path",
+    "shape_intent": {{"kind": "circle", "cx": 50, "cy": 1030, "rx": 50, "ry": 50}},
+    "fill": "#1A3A8F", "opacity": 1.0}}
+
+GRADIENTS — for a smooth colour transition across a rect or path element add a gradient object:
+  gradient fields: start_color (hex), end_color (hex), angle_deg (0=left→right, 90=top→bottom)
+  When gradient is present, fill is ignored.
+  Example: {{"id": "bar", "type": "rect", ...,
+    "gradient": {{"start_color": "#1A4FBF", "end_color": "#0A2A7F", "angle_deg": 0}}}}
+
+SEQUENTIAL TICKER — when the user wants discrete lines entering one-at-a-time with pauses,
+use ticker_items instead of a manually assembled content string:
+  ticker_items: list of {{"text": "...", "pause_after_ms": N}} objects
+  The pipeline measures each item's rendered width, inserts correctly-sized gap spacers,
+  and assembles the final content string automatically.
+  You still need the text_x_offset animation track (value=0 → any negative; corrector fixes it).
+  NEVER combine ticker_items with a manual content string on the same element.
+  Example:
+    {{"id": "ticker", "type": "text",
+      "ticker_items": [
+        {{"text": "First headline here", "pause_after_ms": 1000}},
+        {{"text": "Second headline here", "pause_after_ms": 1000}},
+        {{"text": "Third headline here", "pause_after_ms": 1000}}
+      ],
+      "x": {canvas_w}, "y": {bar_center_headline},
+      "fill": "{text_color}", "font_size": {font_size_headline},
+      "font_weight": "bold", "clip_to": "scroll_bar"}}
 
 OUTPUT SCHEMA:
 {{
@@ -113,12 +154,20 @@ CRITICAL: The examples below show structure only.
 NEVER copy the <<USER_HEADLINE_X>> placeholder text into your output.
 Always use the EXACT words from the user's prompt.
 
+ELEMENT DISCIPLINE: Only generate the minimum elements the design requires.
+Do not add decorative background rects, duplicate bar rects, or wrapper rects
+that were not described by the user.
+When the design uses a badge + label + scroll_bar (Example 3 pattern),
+do NOT also add a full-width "bar" rect spanning the full lower-third height —
+the badge, label, and scroll_bar already define all visual zones.
+Every rect used as a clip_to target MUST have an explicit h (height) value set.
+
 EXAMPLE 1 — Rotating two headlines (slide-up entry, 5s hold, slide-up exit, infinite loop):
 
 Geometry reference for this canvas:
-  BELOW  = {bar_below}   (bar_y + bar_h — just below visible area)
-  CENTER = {bar_center_headline}  (bar_y + bar_padding_top + font_size_headline — text baseline in bar)
-  ABOVE  = {bar_above_headline}  (bar_y - font_size_headline — just above visible area)
+  BELOW  = {bar_below}   (bar_y + bar_h + 60 — fully below visible area)
+  CENTER = {bar_center_headline}  (bar_y + bar_padding_top — text TOP inside bar)
+  ABOVE  = {bar_above_headline}  (bar_y - font_size_headline - bar_padding_top — fully above visible area)
 
 {{
   "content_mode": "news_ticker",
@@ -154,6 +203,18 @@ Geometry reference for this canvas:
   }}
 }}
 
+TICKER WIDTH NOTE:
+The pipeline measures the exact rendered pixel width of ticker
+text after you output the MotionIR. It automatically corrects:
+  • the text_x_offset final keyframe value
+  • loop_after_ms to match the corrected scroll duration
+You do NOT need to calculate pixel width accurately.
+You MUST still provide a text_x_offset track with at least
+two keyframes (t_ms=0, value=0) and a non-zero endpoint.
+The endpoint value will be replaced — its magnitude does not
+matter, only its sign (must be negative for left-scroll).
+Never omit the text_x_offset track for ticker elements.
+
 EXAMPLE 2 — Continuous ticker crawl (two statements, infinite loop):
 
 {{
@@ -180,6 +241,90 @@ EXAMPLE 2 — Continuous ticker crawl (two statements, infinite loop):
        ]}}
     ],
     "loop": {{"enabled": true, "count": 0, "type": "restart", "loop_after_ms": 44000}},
-    "total_ms": 44000
+    "total_ms": 3600000
+  }}
+}}
+
+EXAMPLE 3 — Circle badge + gradient label + sequential scrolling ticker (three news lines, 1 s pause between each):
+
+Layout:
+  badge    — filled circle on the far left, centred vertically in the lower-third zone
+  label    — gradient-filled rect to the right of the badge, holds a bold white label
+  accent   — small solid rect to the right of the label (decorative)
+  scroll_bar — full-width rect below badge/label row, holds the scrolling ticker
+
+{{
+  "content_mode": "news_ticker",
+  "bar_color": "{bar_color}",
+  "text_color": "{text_color}",
+  "font_family": "Noto Sans",
+  "broadcast_safe": true,
+  "language_dir": "ltr",
+  "motion": {{
+    "elements": [
+      {{
+        "id": "label", "type": "rect",
+        "x": 105, "y": {bar_y}, "w": 400, "h": {bar_half_h},
+        "gradient": {{"start_color": "#2A6FDF", "end_color": "#0A2480", "angle_deg": 0}}
+      }},
+      {{
+        "id": "label_text", "type": "text",
+        "content": "<<USER_LABEL>>",
+        "x": 120, "y": {bar_center_headline},
+        "fill": "#FFFFFF", "font_size": {font_size_headline},
+        "font_weight": "bold", "clip_to": "label"
+      }},
+      {{
+        "id": "accent", "type": "rect",
+        "x": 505, "y": {bar_y}, "w": 300, "h": {bar_half_h},
+        "fill": "#C8C8D0", "opacity": 1.0
+      }},
+      {{
+        "id": "scroll_bar", "type": "rect",
+        "x": 0, "y": {bar_y_lower}, "w": {canvas_w}, "h": {bar_half_h},
+        "fill": "#FFFFFF", "opacity": 1.0
+      }},
+      {{
+        "id": "ticker", "type": "text",
+        "ticker_items": [
+          {{"text": "<<USER_LINE_1>>", "pause_after_ms": 1000}},
+          {{"text": "<<USER_LINE_2>>", "pause_after_ms": 1000}},
+          {{"text": "<<USER_LINE_3>>", "pause_after_ms": 1000}}
+        ],
+        "x": {canvas_w}, "y": {bar_center_ticker},
+        "fill": "#1A1A3A", "font_size": {font_size_headline},
+        "font_weight": "bold", "clip_to": "scroll_bar"
+      }},
+      {{
+        "id": "badge", "type": "path",
+        "shape_intent": {{"kind": "circle", "cx": 50, "cy": {bar_y_mid}, "rx": 50, "ry": 50}},
+        "fill": "#1A3A8F", "opacity": 1.0
+      }},
+      {{
+        "id": "badge_line1", "type": "text",
+        "content": "<<USER_BADGE_LINE_1>>",
+        "x": 12, "y": {bar_y_mid_upper},
+        "fill": "#FFFFFF", "font_size": {font_size_badge},
+        "font_weight": "bold"
+      }},
+      {{
+        "id": "badge_line2", "type": "text",
+        "content": "<<USER_BADGE_LINE_2>>",
+        "x": 12, "y": {bar_y_mid_lower},
+        "fill": "#FFFFFF", "font_size": {font_size_badge},
+        "font_weight": "bold"
+      }}
+    ],
+    "tracks": [
+      {{
+        "element_id": "ticker", "property": "text_x_offset",
+        "keyframes": [
+          {{"t_ms": 0,     "value": 0,      "easing": {{"type": "linear"}}}},
+          {{"t_ms": 60000, "value": -10000}}
+        ]
+      }}
+    ],
+    "loop": {{"enabled": true, "count": 0, "type": "restart", "loop_after_ms": 60000}},
+    "total_ms": 3600000
   }}
 }}

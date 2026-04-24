@@ -10,7 +10,6 @@ from lower_third.choreography.brand_resolver import ResolvedBrand
 log = logging.getLogger(__name__)
 
 SAFETY_MARGIN_PX  = 60
-CHARS_TO_PX_RATIO = 15
 FONT_DESCENDER    = 1.5
 
 # Safety ceiling for loop renders when no explicit user duration is set.
@@ -34,11 +33,207 @@ PLACEHOLDER_PATTERNS = [
 
 def apply_geometric_corrections(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
     ir = _fix_clip_boundaries(ir, brand)
+    ir = _fix_clip_target_dimensions(ir, brand)  # ensure clip rects have non-zero h
+    ir = _ensure_ticker_scroll_bar(ir, brand)   # must run before draw-order sort
     ir = _fix_timing_consistency(ir)
     ir = _fix_track_uniqueness(ir)
     ir = _fix_initial_visibility(ir, brand)
     ir = _fix_loop_placeholder_content(ir)
+    ir = _fix_draw_order(ir)
     return ir
+
+
+_TICKER_DARK_FILL  = "#1A1A3A"
+_SCROLL_BAR_FILL   = "#FFFFFF"
+_SCROLL_BAR_ID     = "scroll_bar"
+_UPPER_BAR_ID      = "upper_bar_bg"
+_BADGE_WIDTH       = 100.0   # badge cx=50, rx=50 → right edge at x=100
+
+
+def _is_light_color(hex_color: str) -> bool:
+    """Return True if the color has high luminance (light / not readable on white)."""
+    try:
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+        return (0.299 * r + 0.587 * g + 0.114 * b) > 128
+    except (ValueError, AttributeError, IndexError):
+        return False
+
+
+def _ensure_ticker_scroll_bar(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
+    """Guarantee every scrolling ticker element has a pure-white scroll bar.
+
+    The LLM sometimes skips the white background rect entirely, or generates it
+    with the wrong fill/position.  This step is deterministic: it always produces
+    the correct white strip and wires up the ticker's clip_to reference to it.
+
+    Invariants enforced:
+    * A rect element with id=scroll_bar exists at y=bar_y+bar_h//2, h=bar_h//2,
+      x=0, w=canvas_w, fill=#FFFFFF, opacity=1.0.
+    * Every ticker text element (has ticker_items or repeat_content) has
+      clip_to pointing to that scroll_bar.
+    * Every ticker text element has a dark fill so text is legible on white.
+    """
+    ticker_elements = [
+        el for el in ir.elements
+        if el.type == "text" and (
+            (el.ticker_items and len(el.ticker_items) > 0) or el.repeat_content
+        )
+    ]
+    if not ticker_elements:
+        return ir
+
+    scroll_y = float(brand.bar_y + brand.bar_h // 2)
+    scroll_h = float(brand.bar_h - brand.bar_h // 2)  # handles odd bar_h
+
+    element_map: dict[str, ElementDef] = {el.id: el for el in ir.elements}
+    new_elements = list(ir.elements)
+
+    # Find any existing rect near the expected scroll-bar position.
+    # Use a tight tolerance (5px) so we don't accidentally match the label/accent
+    # rects that sit just above the scroll bar.
+    existing_sb: ElementDef | None = None
+    for el in ir.elements:
+        if el.type != "rect" or el.y is None:
+            continue
+        if abs(float(el.y) - scroll_y) <= 5:
+            existing_sb = el
+            break
+
+    if existing_sb is not None:
+        # Fix fill / opacity / position in-place and normalise id.
+        expected_w = float(brand.canvas_w) - _BADGE_WIDTH
+        updates: dict = {}
+        if existing_sb.fill != _SCROLL_BAR_FILL:
+            updates["fill"] = _SCROLL_BAR_FILL
+        if existing_sb.opacity != 1.0:
+            updates["opacity"] = 1.0
+        if existing_sb.id != _SCROLL_BAR_ID:
+            updates["id"] = _SCROLL_BAR_ID
+        if (existing_sb.x or 0.0) < _BADGE_WIDTH:
+            updates["x"] = _BADGE_WIDTH
+            updates["w"] = expected_w
+        if updates:
+            fixed = existing_sb.model_copy(update=updates)
+            new_elements = [fixed if e.id == existing_sb.id else e for e in new_elements]
+            log.info(
+                "Fixed scroll_bar '%s': %s", existing_sb.id,
+                {k: v for k, v in updates.items()},
+            )
+    else:
+        # Inject a brand-new white scroll bar, offset past the badge circle.
+        # Badge occupies x=[0, _BADGE_WIDTH]; start the scroll bar after it.
+        sb = ElementDef(
+            id=_SCROLL_BAR_ID, type="rect",
+            x=_BADGE_WIDTH, y=scroll_y,
+            w=float(brand.canvas_w) - _BADGE_WIDTH, h=scroll_h,
+            fill=_SCROLL_BAR_FILL, opacity=1.0,
+        )
+        new_elements.append(sb)
+        log.info(
+            "Injected white scroll_bar at x=%.0f y=%.0f w=%.0f h=%.0f",
+            _BADGE_WIDTH, scroll_y, float(brand.canvas_w) - _BADGE_WIDTH, scroll_h,
+        )
+
+    # Ensure the upper half of the bar (above the scroll_bar) has a full-width
+    # background rect. When the LLM only generates narrow label+accent elements
+    # (e.g. 400px + 300px), the rest of the upper row is transparent and looks
+    # disconnected from the full-width white scroll_bar below.
+    upper_y = float(brand.bar_y)
+    upper_h = float(brand.bar_h // 2)
+    upper_w = float(brand.canvas_w) - _BADGE_WIDTH
+    has_upper_bg = any(
+        e.type == "rect"
+        and e.id != _SCROLL_BAR_ID
+        and e.y is not None
+        and abs(float(e.y) - upper_y) <= 5
+        and (e.w or 0) >= upper_w * 0.9   # covers ≥90% of expected width
+        for e in new_elements
+    )
+    if not has_upper_bg:
+        upper_bg = ElementDef(
+            id=_UPPER_BAR_ID, type="rect",
+            x=_BADGE_WIDTH, y=upper_y,
+            w=upper_w, h=upper_h,
+            fill=_TICKER_DARK_FILL, opacity=1.0,
+        )
+        # Insert at position 0 so it paints behind everything else
+        new_elements = [upper_bg] + new_elements
+        log.info(
+            "Injected upper_bar_bg at x=%.0f y=%.0f w=%.0f h=%.0f",
+            _BADGE_WIDTH, upper_y, upper_w, upper_h,
+        )
+
+    # Wire every ticker element to the (now-guaranteed) scroll_bar.
+    scroll_bar_top_y = scroll_y + brand.bar_padding_top  # text TOP within scroll_bar
+    updated_ids = {_SCROLL_BAR_ID}  # already handled above
+    for ticker_el in ticker_elements:
+        t_updates: dict = {}
+        if ticker_el.clip_to != _SCROLL_BAR_ID:
+            t_updates["clip_to"] = _SCROLL_BAR_ID
+            # When rewiring from a different clip region, y may be in the upper half.
+            # Move it into the scroll_bar so the text is actually visible.
+            if ticker_el.y < scroll_y:
+                t_updates["y"] = scroll_bar_top_y
+                log.info(
+                    "Ticker '%s': y %.0f → %.0f (moved into scroll_bar)",
+                    ticker_el.id, ticker_el.y, scroll_bar_top_y,
+                )
+        if ticker_el.fill and _is_light_color(ticker_el.fill):
+            t_updates["fill"] = _TICKER_DARK_FILL
+            log.info(
+                "Ticker '%s': fill %s → %s (dark text on white bg)",
+                ticker_el.id, ticker_el.fill, _TICKER_DARK_FILL,
+            )
+        if t_updates:
+            updated = ticker_el.model_copy(update=t_updates)
+            new_elements = [updated if e.id == ticker_el.id else e for e in new_elements]
+
+    return ir.model_copy(update={"elements": new_elements})
+
+
+def _fix_clip_target_dimensions(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
+    """Ensure every rect used as a clip_to target has non-zero width and height.
+
+    The LLM sometimes omits ``h`` (and occasionally ``w``) on label / accent
+    rects.  When h is None the renderer sees a zero-height clip box and all
+    text inside becomes invisible.  We patch the dimension to a sensible
+    default derived from the brand geometry:
+      • Full-width rects (w ≥ 90 % of canvas) → full bar height
+      • Narrow rects (label, accent, …)        → upper half of the bar
+    """
+    clip_ids = {el.clip_to for el in ir.elements if el.clip_to}
+    if not clip_ids:
+        return ir
+
+    half_h = float(brand.bar_h // 2)
+    full_h = float(brand.bar_h)
+
+    new_elements = list(ir.elements)
+    for i, el in enumerate(new_elements):
+        if el.id not in clip_ids or el.type != "rect":
+            continue
+
+        updates: dict = {}
+        if not el.h:
+            el_w = el.w or 0.0
+            h = full_h if el_w >= brand.canvas_w * 0.9 else half_h
+            updates["h"] = h
+            log.info(
+                "Clip target '%s': h was None/0, set to %.0f px (inferred from geometry)",
+                el.id, h,
+            )
+        if not el.w:
+            updates["w"] = float(brand.canvas_w)
+            log.info(
+                "Clip target '%s': w was None/0, set to %d px", el.id, brand.canvas_w,
+            )
+
+        if updates:
+            new_elements[i] = el.model_copy(update=updates)
+
+    return ir.model_copy(update={"elements": new_elements})
 
 
 def _fix_clip_boundaries(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
@@ -90,7 +285,13 @@ def _fix_clip_boundaries(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
             track = track.model_copy(update={"keyframes": corrected_kfs})
 
         elif track.property == "x":
-            estimated_w = len(elem.content or "") * CHARS_TO_PX_RATIO
+            from lower_third.renderer.text_measurer import measure_text_width
+            estimated_w = measure_text_width(
+                text=elem.content or "",
+                font_family=getattr(elem, "font_family", "Noto Sans"),
+                font_size=elem.font_size or 32,
+                font_weight=getattr(elem, "font_weight", "regular"),
+            )
             corrected_kfs = []
             for kf in new_keyframes:
                 v = kf.value
@@ -228,6 +429,37 @@ def _fix_initial_visibility(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
                 elem.id,
             )
 
+    return ir
+
+
+def _fix_draw_order(ir: MotionIR) -> MotionIR:
+    """Enforce correct draw order: rect → path → text.
+
+    The LLM sometimes generates elements in the wrong order, e.g. scroll_bar
+    (rect) after the badge (path), causing the white bar to paint over the badge.
+    Sorting rect→path→text ensures:
+      - Background rects (scroll_bar, label) render first
+      - Badge circles (path) render next, sitting on top of rects
+      - All text elements render last, so badge texts appear on top of the badge
+        circle and ticker text appears on top of the white scroll bar
+    """
+    # rect → path → text: backgrounds paint first, then badge shapes, then all
+    # text layers on top. This ensures badge texts (type=text) always render
+    # after the badge circle (type=path), so LIVE/NEWS text is visible.
+    type_order = {"rect": 0, "path": 1, "text": 2}
+    original_order = {el.id: i for i, el in enumerate(ir.elements)}
+
+    sorted_elements = sorted(
+        ir.elements,
+        key=lambda el: (type_order.get(el.type, 1), original_order[el.id]),
+    )
+
+    if [el.id for el in sorted_elements] != [el.id for el in ir.elements]:
+        log.info(
+            "Reordered elements for correct draw order: %s",
+            [el.id for el in sorted_elements],
+        )
+        return ir.model_copy(update={"elements": sorted_elements})
     return ir
 
 

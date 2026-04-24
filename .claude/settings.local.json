@@ -5,7 +5,20 @@
       "Read(//Users/yashaggarwal/**)",
       "Bash(.venv/bin/pytest tests/test_geometry_corrector.py -v)",
       "Bash(.venv/bin/pytest tests/ -v --tb=short)",
-      "Bash(.venv/bin/pytest tests/ --tb=short)"
+      "Bash(.venv/bin/pytest tests/ --tb=short)",
+      "Bash(.venv/bin/python -m pytest tests/ -x -q)",
+      "Bash(.venv/bin/python -m pytest tests/ -q)",
+      "Bash(git stash *)",
+      "Bash(.venv/bin/python -m pytest tests/test_cairo_renderer.py -q)",
+      "Bash(.venv/bin/python -)",
+      "Bash(.venv/bin/python -c \"import lower_third; print\\(lower_third.__file__\\)\")",
+      "Bash(PYTHONPATH=/Users/yashaggarwal/Desktop/CC-Modules/lower_third .venv/bin/python -)",
+      "Bash(.venv/bin/python -c \"import sys; sys.path.insert\\(0,'..'\\); from lower_third.motion.motion_ir import ElementDef; print\\('ok'\\)\")",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(python -m pytest tests/ -x -q)",
+      "Bash(python3 -m pytest tests/ -x -q)",
+      "Bash(python -m pytest tests/test_ticker_corrector.py -q)",
+      "Bash(python3 -m pytest tests/test_ticker_corrector.py -q)"
     ]
   }
 }

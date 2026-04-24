@@ -37,9 +37,28 @@ def _load_system_prompt(brand: ResolvedBrand) -> str:
         bar_color=brand.bar_color,
         text_color=brand.text_color,
         # computed geometry for examples
-        bar_below=brand.bar_y + brand.bar_h,
-        bar_center_headline=brand.bar_y + brand.bar_padding_top + brand.font_size_headline,
-        bar_above_headline=brand.bar_y - brand.font_size_headline,
+        # y = TOP of text bounding box (Cairo/Pango origin is upper-left, not baseline)
+        bar_below=brand.bar_y + brand.bar_h + 60,
+        bar_center_headline=brand.bar_y + brand.bar_padding_top,
+        bar_above_headline=brand.bar_y - brand.font_size_headline - brand.bar_padding_top,
+        # example 3 geometry (two-row lower-third with circle badge)
+        bar_half_h=brand.bar_h // 2,
+        bar_y_lower=brand.bar_y + brand.bar_h // 2,
+        bar_y_mid=brand.bar_y + brand.bar_h // 2,
+        bar_center_ticker=(
+            brand.bar_y + brand.bar_h // 2
+            + brand.bar_padding_top
+        ),
+        # badge text: two lines centred vertically inside the circle
+        font_size_badge=max(14, brand.bar_h // 5),
+        bar_y_mid_upper=(
+            brand.bar_y + brand.bar_h // 2
+            - brand.bar_h // 5  # one line above badge centre
+        ),
+        bar_y_mid_lower=(
+            brand.bar_y + brand.bar_h // 2
+            + 2  # one line below badge centre
+        ),
     )
 
 

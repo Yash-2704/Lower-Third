@@ -50,6 +50,8 @@ class GenerateRequest(BaseModel):
     total_duration_ms: int | None = None
     tts_timestamps: dict | None = None
     instance_id: str | None = None
+    timecode_in: str | None = None
+    timecode_out: str | None = None
 
 
 class GenerateResponse(BaseModel):
@@ -84,6 +86,8 @@ async def generate(request: GenerateRequest):
                 total_duration_ms=request.total_duration_ms,
                 tts_timestamps=request.tts_timestamps,
                 instance_id=request.instance_id,
+                timecode_in=request.timecode_in,
+                timecode_out=request.timecode_out,
             ),
         )
 
@@ -147,6 +151,8 @@ async def generate_stream(request: GenerateRequest):
                 tts_timestamps=request.tts_timestamps,
                 instance_id=request.instance_id,
                 progress_callback=progress_callback,
+                timecode_in=request.timecode_in,
+                timecode_out=request.timecode_out,
             )
             q.put({"result": result})
         except Exception as e:
@@ -160,9 +166,9 @@ async def generate_stream(request: GenerateRequest):
 
         while True:
             try:
-                item = await loop.run_in_executor(None, lambda: q.get(timeout=120))
+                item = await loop.run_in_executor(None, lambda: q.get(timeout=600))
             except queue.Empty:
-                yield "data: {\"error\": \"timeout\"}\n\n"
+                yield "data: {\"error\": \"timeout: pipeline exceeded 10 minutes\"}\n\n"
                 break
 
             if "error" in item:

@@ -253,6 +253,48 @@ def test_apply_geometric_corrections_does_not_raise_on_empty_tracks():
     assert isinstance(result, MotionIR)
 
 
+def test_x_branch_uses_proportional_width():
+    """Verify CHARS_TO_PX_RATIO flat estimate is gone: WWW and iii produce different estimated_w."""
+    try:
+        import cairocffi  # noqa: F401
+    except (ImportError, OSError):
+        pytest.skip("cairocffi not installed")
+
+    brand = _brand()
+    bar = _bar()
+
+    wide_text = ElementDef(
+        id="tw", type="text", content="WWWWWWWWWW",
+        x=24, y=960, fill="#FFFFFF", font_size=32, clip_to="bar"
+    )
+    narrow_text = ElementDef(
+        id="tn", type="text", content="iiiiiiiiii",
+        x=24, y=960, fill="#FFFFFF", font_size=32, clip_to="bar"
+    )
+
+    def _x_track(elem_id: str) -> AnimationTrack:
+        return AnimationTrack(
+            element_id=elem_id, property="x",
+            keyframes=[
+                Keyframe(t_ms=0, value=-5.0),
+                Keyframe(t_ms=400, value=24.0),
+            ]
+        )
+
+    ir_wide = MotionIR(elements=[bar, wide_text], tracks=[_x_track("tw")], total_ms=1000)
+    ir_narrow = MotionIR(elements=[bar, narrow_text], tracks=[_x_track("tn")], total_ms=1000)
+
+    result_wide = _fix_clip_boundaries(ir_wide, brand)
+    result_narrow = _fix_clip_boundaries(ir_narrow, brand)
+
+    wide_kf0_v = result_wide.tracks[0].keyframes[0].value
+    narrow_kf0_v = result_narrow.tracks[0].keyframes[0].value
+
+    assert wide_kf0_v != narrow_kf0_v, (
+        "CHARS_TO_PX_RATIO flat ratio is still in use — WWW and iii produced same estimated_w"
+    )
+
+
 def test_motion_ir_rejects_duplicate_tracks():
     bar = _bar()
     text = _text()

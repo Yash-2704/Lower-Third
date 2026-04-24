@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+import warnings as _warnings_mod
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from lower_third.parser.prompt_schema import LowerThirdSpec
 log = logging.getLogger(__name__)
 _CONSTANTS_PATH = Path(__file__).resolve().parent.parent / "config" / "module_constants.json"
 
+LOOP_SEAMLESS_THRESHOLD: float = 8.0
+
 
 @dataclass
 class QCReport:
@@ -20,6 +23,7 @@ class QCReport:
     min_contrast_ratio: float
     luma_in_range: bool
     fps_match: bool
+    loop_seamless: bool | None = None
 
 
 def wcag_contrast_ratio(hex_a: str, hex_b: str) -> float:
@@ -37,7 +41,12 @@ def wcag_contrast_ratio(hex_a: str, hex_b: str) -> float:
     return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
 
 
-def validate(webm_path: Path, spec: LowerThirdSpec, project_fps: int = 30) -> QCReport:
+def validate(
+    webm_path: Path,
+    spec: LowerThirdSpec,
+    project_fps: int = 30,
+    frames_dir: Path | None = None,
+) -> QCReport:
     constants = json.loads(_CONSTANTS_PATH.read_text())
     broadcast_luma_min = constants["broadcast_luma_min"]
     broadcast_luma_max = constants["broadcast_luma_max"]
@@ -100,6 +109,56 @@ def validate(webm_path: Path, spec: LowerThirdSpec, project_fps: int = 30) -> QC
 
     cap.release()
 
+    # Frame-diff check for loop seamlessness
+    loop_seamless: bool | None = None
+
+    if (frames_dir is not None
+            and spec.motion.loop.enabled
+            and spec.motion.loop.loop_after_ms is not None):
+
+        fps        = project_fps
+        loop_ms    = spec.motion.loop.loop_after_ms
+        loop_frame_idx = int(loop_ms * fps / 1000)
+
+        frame0_path = frames_dir / "frame_000000.png"
+        loop_path   = frames_dir / f"frame_{loop_frame_idx:06d}.png"
+
+        if frame0_path.exists() and loop_path.exists():
+            f0 = cv2.imread(str(frame0_path), cv2.IMREAD_UNCHANGED)
+            fL = cv2.imread(str(loop_path),   cv2.IMREAD_UNCHANGED)
+
+            if f0 is not None and fL is not None and f0.shape == fL.shape:
+                if f0.ndim == 3 and f0.shape[2] == 4:
+                    mask = (f0[:, :, 3] > 10) | (fL[:, :, 3] > 10)
+                else:
+                    mask = np.ones(f0.shape[:2], dtype=bool)
+
+                if mask.any():
+                    diff = np.abs(
+                        f0[mask].astype(float) - fL[mask].astype(float)
+                    ).mean()
+                    loop_seamless = bool(diff < LOOP_SEAMLESS_THRESHOLD)
+                    if not loop_seamless:
+                        warnings.append(
+                            f"Loop restart discontinuity: mean pixel diff "
+                            f"{diff:.2f} exceeds threshold "
+                            f"{LOOP_SEAMLESS_THRESHOLD} "
+                            f"(frame 0 vs frame {loop_frame_idx})"
+                        )
+                else:
+                    loop_seamless = True
+            else:
+                log.warning(
+                    "Frame-diff check skipped: frame shape mismatch "
+                    "or load failure (frame 0 vs frame %d)", loop_frame_idx
+                )
+        else:
+            log.warning(
+                "Frame-diff check skipped: frame files not found "
+                "(frames_dir=%s, loop_frame_idx=%d)",
+                frames_dir, loop_frame_idx
+            )
+
     ratio = wcag_contrast_ratio(spec.bar_color, spec.text_color)
     if ratio < min_contrast_ratio:
         warnings.append(
@@ -112,4 +171,5 @@ def validate(webm_path: Path, spec: LowerThirdSpec, project_fps: int = 30) -> QC
         min_contrast_ratio=ratio,
         luma_in_range=luma_ok,
         fps_match=fps_ok,
+        loop_seamless=loop_seamless,
     )

@@ -1,9 +1,41 @@
+import math
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from lower_third.motion.interpolation_engine import DrawState
 
 _CANVAS_W = 1920
 _CANVAS_H = 1080
+
+
+def _lerp_color(c0: tuple[int, int, int], c1: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    return (
+        int(c0[0] + (c1[0] - c0[0]) * t),
+        int(c0[1] + (c1[1] - c0[1]) * t),
+        int(c0[2] + (c1[2] - c0[2]) * t),
+    )
+
+
+def _draw_gradient_rect(
+    draw: ImageDraw.ImageDraw,
+    x: int, y: int, w: int, h: int,
+    start_color: str, end_color: str,
+    angle_deg: float,
+    alpha: int,
+) -> None:
+    c0 = _hex_to_rgb(start_color)
+    c1 = _hex_to_rgb(end_color)
+    angle = math.radians(angle_deg)
+    cos_a = math.cos(angle)
+    sin_a = math.sin(angle)
+    if w <= 0 or h <= 0:
+        return
+    for px in range(w):
+        for py in range(h):
+            dx = (px / (w - 1) if w > 1 else 0.5) - 0.5
+            dy = (py / (h - 1) if h > 1 else 0.5) - 0.5
+            t = max(0.0, min(1.0, dx * cos_a + dy * sin_a + 0.5))
+            color = _lerp_color(c0, c1, t) + (alpha,)
+            draw.point((x + px, y + py), fill=color)
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
@@ -46,12 +78,22 @@ def draw_frame(state: DrawState, out_path: Path) -> None:
         alpha = int(opacity * 255)
         r, g, b = _hex_to_rgb(fill)
         fill_rgba = (r, g, b, alpha)
+        gradient_def = el.get("gradient")
 
         layer = Image.new("RGBA", (_CANVAS_W, _CANVAS_H), (0, 0, 0, 0))
         draw = ImageDraw.Draw(layer)
 
         if el_type == "rect" and w > 0 and h > 0:
-            draw.rectangle([x, y, x + w, y + h], fill=fill_rgba)
+            if gradient_def:
+                _draw_gradient_rect(
+                    draw, x, y, w, h,
+                    gradient_def["start_color"],
+                    gradient_def["end_color"],
+                    gradient_def.get("angle_deg", 0.0),
+                    alpha,
+                )
+            else:
+                draw.rectangle([x, y, x + w, y + h], fill=fill_rgba)
 
         elif el_type == "text" and content is not None:
             try:

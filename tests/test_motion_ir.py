@@ -1,7 +1,7 @@
 import pytest
 from lower_third.motion.motion_ir import (
     MotionIR, ElementDef, AnimationTrack, Keyframe,
-    EasingConfig, EasingType, LoopConfig
+    EasingConfig, EasingType, LoopConfig, ShapeIntent, ShapeKind,
 )
 from lower_third.parser.prompt_schema import LowerThirdSpec, ContentMode
 from pydantic import ValidationError
@@ -108,3 +108,25 @@ def test_instance_id_excluded_from_llm_serialisation():
 def test_content_mode_enum_values():
     assert ContentMode.person_chyron == "person_chyron"
     assert ContentMode.news_ticker == "news_ticker"
+
+
+# ── path ElementDef tests ─────────────────────────────────────────────────────
+
+def test_path_element_with_intent_constructs():
+    intent = ShapeIntent(kind=ShapeKind.circle, cx=960, cy=540, rx=40, ry=40)
+    el = ElementDef(id="badge", type="path", shape_intent=intent, fill="#E63946")
+    assert el.type == "path"
+    assert el.shape_intent is not None
+    assert el.d is None
+
+
+def test_path_element_with_d_constructs():
+    el = ElementDef(id="manual", type="path", d="M 0,0 Z", fill="#000000")
+    assert el.type == "path"
+    assert el.d == "M 0,0 Z"
+    assert el.shape_intent is None
+
+
+def test_path_element_with_neither_raises():
+    with pytest.raises(ValidationError):
+        ElementDef(id="bad", type="path", fill="#000000")

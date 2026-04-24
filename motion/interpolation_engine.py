@@ -54,6 +54,13 @@ class InterpolationEngine:
             clip_w = self._resolve(elem.id, "clip_w", t_ms, clip_w_default)
             clip_h = self._resolve(elem.id, "clip_h", t_ms, clip_h_default)
 
+            gradient_dict = None
+            if elem.gradient is not None:
+                gradient_dict = {
+                    "start_color": elem.gradient.start_color,
+                    "end_color": elem.gradient.end_color,
+                    "angle_deg": elem.gradient.angle_deg,
+                }
             result.append({
                 "id": elem.id,
                 "type": elem.type,
@@ -61,6 +68,8 @@ class InterpolationEngine:
                 "repeat_content": elem.repeat_content,
                 "clip_to": elem.clip_to,
                 "fill": elem.fill,
+                "gradient": gradient_dict,
+                "d": elem.d,
                 "font_size": elem.font_size,
                 "font_weight": elem.font_weight,
                 "font_family": elem.font_family,

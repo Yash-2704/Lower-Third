@@ -6,7 +6,9 @@ from pathlib import Path
 
 from lower_third.choreography.brand_resolver import resolve_brand
 from lower_third.parser.llm_parser import parse_prompt
+from lower_third.motion.shape_resolver import resolve_shapes
 from lower_third.motion.geometry_corrector import apply_geometric_corrections
+from lower_third.motion.ticker_corrector import correct_ticker_widths
 from lower_third.motion.interpolation_engine import InterpolationEngine
 from lower_third.renderer import render
 from lower_third.renderer.ffmpeg_encoder import encode_to_webm
@@ -26,6 +28,8 @@ def generate_lower_third(
     tts_timestamps: dict | None = None,
     instance_id: str | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    timecode_in: str | None = None,
+    timecode_out: str | None = None,
 ) -> dict:
     def _progress(stage: str) -> None:
         if progress_callback:
@@ -66,6 +70,10 @@ def generate_lower_third(
         except (ImportError, Exception) as e:
             log.warning("TTS anchor skipped: %s", e)
 
+    # Step 3c — Shape resolver (converts shape_intent → SVG path d string)
+    spec.motion = resolve_shapes(spec.motion)
+    log.info("Shape resolver applied")
+
     # Step 5 — Cache check
     cached_path = cache_hit(spec)
     _progress("cache_check")
@@ -79,7 +87,11 @@ def generate_lower_third(
         _progress("encode")
         qc_report = validate(video_path, spec, project_fps)
         _progress("qc")
-        manifest = write_manifest(spec, video_path, qc_report, output_dir)
+        manifest = write_manifest(
+            spec, video_path, qc_report, output_dir,
+            timecode_in=timecode_in,
+            timecode_out=timecode_out,
+        )
         _progress("manifest")
         return {"video_path": video_path, "manifest": manifest,
                 "qc_report": qc_report, "cache_hit": True}
@@ -88,6 +100,10 @@ def generate_lower_third(
     log.info("Applying geometric corrections")
     spec.motion = apply_geometric_corrections(spec.motion, brand)
     log.info("Geometric corrections applied")
+
+    # Step 5c — Ticker width correction (must run after geometry, before render)
+    spec.motion = correct_ticker_widths(spec.motion)
+    log.info("Ticker widths corrected")
     _progress("geometry")
 
     # Step 6 — Interpolation engine
@@ -110,13 +126,17 @@ def generate_lower_third(
     cache_write(spec, video_path)
 
     # Step 10 — QC
-    qc_report = validate(video_path, spec, project_fps)
+    qc_report = validate(video_path, spec, project_fps, frames_dir=frames_dir)
     if qc_report.warnings:
         log.warning("QC warnings: %s", qc_report.warnings)
     _progress("qc")
 
     # Step 11 — Manifest
-    manifest = write_manifest(spec, video_path, qc_report, output_dir)
+    manifest = write_manifest(
+        spec, video_path, qc_report, output_dir,
+        timecode_in=timecode_in,
+        timecode_out=timecode_out,
+    )
     _progress("manifest")
 
     # Step 12 — Return
