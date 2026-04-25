@@ -3,7 +3,7 @@ from lower_third.motion.motion_ir import (
     AnimationTrack, ElementDef, EasingConfig, EasingType,
     Keyframe, LoopConfig, MotionIR, TickerItem,
 )
-from lower_third.motion.ticker_corrector import correct_ticker_widths
+from lower_third.motion.ticker_corrector import correct_ticker_widths, CANVAS_WIDTH_PX
 from lower_third.renderer.text_measurer import SCROLL_SPEED_PX_S
 
 
@@ -15,7 +15,7 @@ def _ticker_element(content: str = "Breaking News  •  More updates here  •  
     return ElementDef(
         id="ticker", type="text",
         content=content,
-        repeat_content=True,
+        repeat_content=False,
         x=1920, y=972,
         fill="#FFFFFF", font_size=32,
         clip_to="bar",
@@ -154,13 +154,12 @@ def test_repeat_content_false_not_treated_as_ticker():
     assert result is ir
 
 
-def test_ticker_element_no_offset_track_logs_warning_no_crash(caplog):
-    import logging
+def test_ticker_element_no_offset_track_no_crash():
+    # Element with no text_x_offset track is not detected as a ticker; no processing occurs.
     ir = _make_ir(include_ticker_track=False)
-    with caplog.at_level(logging.WARNING):
-        result = correct_ticker_widths(ir)
+    result = correct_ticker_widths(ir)
     assert isinstance(result, MotionIR)
-    assert any("no text_x_offset track" in r.message for r in caplog.records)
+    assert result is ir
 
 
 def test_idempotent():
@@ -182,7 +181,7 @@ def test_ticker_x_aligned_to_clip_bar_right():
     ticker = ElementDef(
         id="ticker", type="text",
         content="News line  •  ",
-        repeat_content=True,
+        repeat_content=False,
         x=1920, y=972,
         fill="#FFFFFF", font_size=32,
         clip_to="bar",
@@ -208,7 +207,7 @@ def test_ticker_x_unchanged_when_no_clip_bar():
     ticker = ElementDef(
         id="ticker", type="text",
         content="News line  •  ",
-        repeat_content=True,
+        repeat_content=False,
         x=1920, y=972,
         fill="#FFFFFF", font_size=32,
     )
@@ -266,11 +265,11 @@ def test_ticker_items_produces_content():
     assert "Third headline" in ticker_out.content
 
 
-def test_ticker_items_sets_repeat_content():
+def test_ticker_items_sets_repeat_content_false():
     ir = _make_ticker_items_ir()
     result = correct_ticker_widths(ir)
     ticker_out = next(e for e in result.elements if e.id == "ticker")
-    assert ticker_out.repeat_content is True
+    assert ticker_out.repeat_content is False
 
 
 def test_ticker_items_clears_ticker_items_field():
@@ -295,3 +294,33 @@ def test_ticker_items_loop_after_ms_set():
     result = correct_ticker_widths(ir)
     assert result.loop.loop_after_ms is not None
     assert result.loop.loop_after_ms > 0
+
+
+def test_ticker_corrector_works_with_repeat_content_false():
+    """Ticker identified by text_x_offset track presence, not repeat_content flag."""
+    ticker = ElementDef(
+        id="ticker", type="text",
+        content="Alpha  •  Beta  •  Gamma  •  ",
+        repeat_content=False,
+        x=1920, y=972,
+        fill="#FFFFFF", font_size=32,
+    )
+    track = AnimationTrack(
+        element_id="ticker", property="text_x_offset",
+        keyframes=[
+            Keyframe(t_ms=0, value=0.0, easing=EasingConfig(type=EasingType.linear)),
+            Keyframe(t_ms=99000, value=-9999.0),
+        ],
+    )
+    ir = MotionIR(
+        elements=[ticker], tracks=[track], total_ms=3600000,
+        loop=LoopConfig(enabled=True, count=0, type="restart"),
+    )
+    result = correct_ticker_widths(ir)
+    assert isinstance(result, MotionIR)
+    out_track = next(t for t in result.tracks if t.property == "text_x_offset")
+    final_kf = max(out_track.keyframes, key=lambda k: k.t_ms)
+    # Final value must be negative and larger in magnitude than text width alone
+    # (proving CANVAS_WIDTH_PX=1920 is included in the travel calculation)
+    assert final_kf.value < 0.0
+    assert abs(final_kf.value) > CANVAS_WIDTH_PX

@@ -18,35 +18,34 @@ def test_canvas_dimensions_always_1920_1080():
 
 def test_bar_height_one_line():
     result = resolve_brand({}, estimated_lines=1)
-    # bar_base_height_px = 60, no additional lines
-    assert result.bar_h == 60
+    # bar_h = LABEL_ROW_H + TICKER_ROW_H = 56 + 80 = 136 (fixed, independent of estimated_lines)
+    assert result.bar_h == 136
 
 
 def test_bar_height_two_lines():
     result = resolve_brand({}, estimated_lines=2)
-    # 60 + 1 * 44 = 104
-    assert result.bar_h == 104
+    # bar_h is fixed at LABEL_ROW_H + TICKER_ROW_H = 136
+    assert result.bar_h == 136
 
 
 def test_bar_height_three_lines():
     result = resolve_brand({}, estimated_lines=3)
-    # 60 + 2 * 44 = 148
-    assert result.bar_h == 148
+    # bar_h is fixed at LABEL_ROW_H + TICKER_ROW_H = 136
+    assert result.bar_h == 136
 
 
 def test_bar_y_no_avoid_zone():
     result = resolve_brand({}, estimated_lines=1)
-    # bar_h=60, bar_bottom_margin=60
-    # bar_y = max(1080 - 60 - 60, 0 + 20) = max(960, 20) = 960
-    assert result.bar_y == 960
+    # bar_h=136, no bottom margin: bar_y = max(1080 - 136, 20) = 944
+    assert result.bar_y == 944
 
 
 def test_bar_y_respects_anchor_avoid_zone():
     upstream = {"anchor_avoid_zone": {"x": 0, "y": 800, "w": 1920, "h": 200}}
     result = resolve_brand(upstream, estimated_lines=1)
     # anchor_avoid_zone_bottom = 800 + 200 = 1000
-    # normal bar_y = 960, but 960 < 1000 + 20 = 1020
-    # so bar_y = max(960, 1020) = 1020
+    # normal bar_y = 1080 - 136 = 944, but 944 < 1000 + 20 = 1020
+    # so bar_y = max(944, 1020) = 1020
     assert result.bar_y == 1020
 
 
@@ -54,9 +53,9 @@ def test_bar_y_uses_larger_of_two_values():
     upstream = {"anchor_avoid_zone": {"x": 0, "y": 100, "w": 200, "h": 50}}
     result = resolve_brand(upstream, estimated_lines=1)
     # anchor_avoid_zone_bottom = 150, 150+20=170
-    # normal bar_y = 960
-    # max(960, 170) = 960
-    assert result.bar_y == 960
+    # normal bar_y = 1080 - 136 = 944
+    # max(944, 170) = 944
+    assert result.bar_y == 944
 
 
 def test_style_token_resolves_bar_colour():

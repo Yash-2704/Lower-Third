@@ -9,7 +9,10 @@ from lower_third.renderer.text_measurer import SCROLL_SPEED_PX_S, measure_text_w
 log = logging.getLogger(__name__)
 
 
-_CANVAS_W = 1920.0
+CANVAS_WIDTH_PX: int = 1920
+# Standard broadcast canvas width.
+# Text starts at x=CANVAS_WIDTH_PX and must travel
+# CANVAS_WIDTH_PX + text_width to fully exit the left edge.
 
 
 def _build_ticker_items_content(
@@ -49,7 +52,7 @@ def _build_ticker_items_content(
         )
 
         # Determine clip-bar width so we can calculate the true gap
-        bar_width = _CANVAS_W
+        bar_width = float(CANVAS_WIDTH_PX)
         if el.clip_to and el.clip_to in element_map:
             bar_el = element_map[el.clip_to]
             if bar_el.w is not None:
@@ -75,7 +78,7 @@ def _build_ticker_items_content(
         assembled = "".join(parts)
         new_elements[i] = el.model_copy(update={
             "content": assembled,
-            "repeat_content": True,
+            "repeat_content": False,
             "ticker_items": None,
         })
         changed = True
@@ -92,9 +95,22 @@ def _build_ticker_items_content(
 def correct_ticker_widths(ir: MotionIR) -> MotionIR:
     ir, first_item_widths = _build_ticker_items_content(ir)
 
+    ticker_ids = {
+        track.element_id
+        for track in ir.tracks
+        if track.property == "text_x_offset"
+    }
+
+    for el in ir.elements:
+        if el.id in ticker_ids and (el.type != "text" or el.content is None):
+            log.warning(
+                "Element '%s' has text_x_offset track but no content — skipping ticker correction",
+                el.id,
+            )
+
     ticker_elements = [
         el for el in ir.elements
-        if el.repeat_content is True
+        if el.id in ticker_ids
         and el.type == "text"
         and el.content is not None
     ]
@@ -122,11 +138,12 @@ def correct_ticker_widths(ir: MotionIR) -> MotionIR:
         track_key = (el.id, "text_x_offset")
         track = track_map.get(track_key)
 
-        scroll_ms = max(1000, int((true_width / SCROLL_SPEED_PX_S) * 1000))
+        total_travel = CANVAS_WIDTH_PX + true_width
+        scroll_ms = max(1000, int((total_travel / SCROLL_SPEED_PX_S) * 1000))
 
         if track is None:
             log.warning(
-                "Ticker '%s': no text_x_offset track found — synthesizing one (%.1fpx, %dms)",
+                "Ticker '%s': synthesizing missing text_x_offset track (%.1fpx, %dms)",
                 el.id, true_width, scroll_ms,
             )
             from lower_third.motion.motion_ir import AnimationTrack, Keyframe, EasingConfig, EasingType
@@ -136,19 +153,22 @@ def correct_ticker_widths(ir: MotionIR) -> MotionIR:
                 start_offset_ms=0,
                 keyframes=[
                     Keyframe(t_ms=0, value=0.0, easing=EasingConfig(type=EasingType.linear)),
-                    Keyframe(t_ms=scroll_ms, value=-true_width, easing=EasingConfig(type=EasingType.linear)),
+                    Keyframe(t_ms=scroll_ms, value=-total_travel, easing=EasingConfig(type=EasingType.linear)),
                 ],
             )
             new_tracks.append(synth_track)
         else:
             log.info(
-                "Ticker '%s': LLM width estimate replaced with measured %.1fpx. scroll_ms=%d",
-                el.id, true_width, scroll_ms,
+                "Ticker '%s': measured width=%.1fpx, "
+                "total travel=%.1fpx (canvas+text), "
+                "scroll_ms=%d, loop_after_ms=%d",
+                el.id, true_width, total_travel,
+                scroll_ms, scroll_ms,
             )
 
             sorted_kfs = sorted(track.keyframes, key=lambda kf: kf.t_ms)
             last_kf = sorted_kfs[-1]
-            patched_last = last_kf.model_copy(update={"value": -true_width, "t_ms": scroll_ms})
+            patched_last = last_kf.model_copy(update={"value": -total_travel, "t_ms": scroll_ms})
             patched_kfs = sorted_kfs[:-1] + [patched_last]
 
             patched_track = track.model_copy(update={"keyframes": patched_kfs})

@@ -86,6 +86,7 @@ class InterpolationEngine:
                 "clip_y": clip_y,
                 "clip_w": clip_w,
                 "clip_h": clip_h,
+                "text_align": elem.text_align,
             })
 
         return DrawState(elements=result)

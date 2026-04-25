@@ -255,6 +255,20 @@ def draw_frame(state: DrawState, out_path: Path) -> None:
             fd.weight = pango.Weight.BOLD if font_weight == "bold" else pango.Weight.NORMAL
             layout.font_description = fd
 
+            text_align = el.get("text_align", "left")
+            _align_map = {
+                "left":   pango.Alignment.LEFT,
+                "center": pango.Alignment.CENTER,
+                "right":  pango.Alignment.RIGHT,
+            }
+            layout.alignment = _align_map.get(text_align, pango.Alignment.LEFT)
+            if text_align in ("center", "right"):
+                el_w = el.get("w") or 0
+                if el_w > 0:
+                    layout.width = int(el_w) * _PANGO_SCALE
+                elif text_align == "center":
+                    layout.width = 120 * _PANGO_SCALE
+
             if repeat_content:
                 layout.text = content
                 text_w = layout.get_size()[0] / _PANGO_SCALE

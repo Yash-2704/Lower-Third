@@ -12,6 +12,15 @@ log = logging.getLogger(__name__)
 SAFETY_MARGIN_PX  = 60
 FONT_DESCENDER    = 1.5
 
+# Padding applied to label-row text (e.g. "BREAKING NEWS"):
+#   LEFT_PADDING   — minimum gap between the badge circle's right edge and the
+#                    text's left edge, so the text never crowds the badge.
+#   BOTTOM_OFFSET  — number of pixels to shift the centred y upward, so the
+#                    visible cap-block has visible breathing room above the
+#                    label-row separator line.
+LABEL_TEXT_LEFT_PADDING:  int = 16
+LABEL_TEXT_BOTTOM_OFFSET: int = 8
+
 # Safety ceiling for loop renders when no explicit user duration is set.
 # The LLM emits total_ms=3_600_000 as a sentinel for "loop forever"; we cap
 # that to a sane render budget.  Values the user explicitly selects (e.g.
@@ -35,7 +44,10 @@ def apply_geometric_corrections(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
     ir = _fix_clip_boundaries(ir, brand)
     ir = _fix_clip_target_dimensions(ir, brand)    # ensure clip rects have non-zero h
     ir = _fix_circle_badge_position(ir, brand)     # guard circle cy/cx before ticker injection
+    ir = _fix_badge_text_position(ir, brand)       # enforce badge text y centred in circle
+    ir = _fix_label_text_position(ir, brand)       # enforce label text vertical centering
     ir = _fix_ticker_row_position(ir, brand)       # correct ticker rect y before scroll-bar injection
+    ir = _ensure_separator_line(ir, brand)         # guarantee 2px dark line between rows
     ir = _ensure_ticker_scroll_bar(ir, brand)   # must run before draw-order sort
     ir = _fix_timing_consistency(ir)
     ir = _fix_track_uniqueness(ir)
@@ -64,30 +76,147 @@ def _is_light_color(hex_color: str) -> bool:
 
 
 def _fix_circle_badge_position(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
-    """Ensure circle badge path elements are fully within the canvas and
-    vertically centred in the lower third zone."""
+    """Enforce circle badge position regardless of LLM coordinate choices.
+
+    Always sets cx=rx=60, ry=60, and cy to the vertical centre of the full
+    lower-third zone (bar_y to canvas bottom).  Clears d so the shape resolver
+    recomputes the path from the corrected intent.
+    """
+    expected_rx: float = 60.0
+    expected_ry: float = 60.0
+    expected_cx: float = expected_rx  # flush left: cx == rx
+
     corrected = []
     for el in ir.elements:
         if el.type == "path" and el.shape_intent is not None:
             intent = el.shape_intent
             if intent.kind.value in ("circle", "ellipse"):
-                expected_cy = brand.bar_y + brand.bar_h // 2
-                expected_cx = intent.rx  # flush left: cx = rx
-                max_cy = brand.canvas_h - intent.ry - 2
+                expected_cy = float(
+                    brand.bar_y + (brand.canvas_h - brand.bar_y) // 2
+                )
+                max_cy = float(brand.canvas_h - expected_ry - 2)
                 corrected_cy = min(expected_cy, max_cy)
-                if abs(intent.cy - corrected_cy) > 5:
-                    log.info(
-                        "Correcting circle cy: %d → %d",
-                        intent.cy, corrected_cy,
-                    )
-                    new_intent = intent.model_copy(
-                        update={"cy": corrected_cy, "cx": expected_cx}
-                    )
-                    el = el.model_copy(
-                        update={"shape_intent": new_intent, "d": None}
-                    )
+
+                new_intent = intent.model_copy(update={
+                    "cx": expected_cx,
+                    "cy": corrected_cy,
+                    "rx": expected_rx,
+                    "ry": expected_ry,
+                })
+                el = el.model_copy(update={"shape_intent": new_intent, "d": None})
+                log.info(
+                    "Circle badge corrected: cx=%d cy=%d rx=%d ry=%d",
+                    expected_cx, corrected_cy, expected_rx, expected_ry,
+                )
         corrected.append(el)
     return ir.model_copy(update={"elements": corrected})
+
+
+def _fix_badge_text_position(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
+    """Enforce badge text element y so LIVE/NEWS sit centred in the circle.
+
+    Identifies badge text elements via id substring "badge" OR (no clip_to AND
+    y is within the circle's vertical extent). Requires exactly two such
+    elements; otherwise logs a warning and returns ir unchanged.
+    """
+    cy = brand.circle_cy
+    rx = brand.circle_rx
+    cx = brand.circle_cx
+
+    badge_texts: list[ElementDef] = []
+    for el in ir.elements:
+        if el.type != "text":
+            continue
+        id_match = "badge" in el.id.lower()
+        # Badge text always sits in the leftmost circle column (x ≈ 0..120).
+        # The LLM frequently misplaces it vertically, so we identify by x
+        # rather than y to remain robust to wrong y values.
+        in_circle_column = (
+            el.clip_to is None
+            and float(el.x) < (cx + rx)
+        )
+        if id_match or in_circle_column:
+            badge_texts.append(el)
+
+    if len(badge_texts) != 2:
+        if badge_texts:
+            log.warning(
+                "Badge text correction skipped: expected 2 elements, found %d",
+                len(badge_texts),
+            )
+        return ir
+
+    sorted_texts = sorted(badge_texts, key=lambda e: e.y)
+    line1, line2 = sorted_texts[0], sorted_texts[1]
+
+    fs1 = line1.font_size or 16
+    fs2 = line2.font_size or 16
+    targets: dict[str, dict] = {
+        line1.id: {
+            "y": float(cy - fs1),
+            "x": float(cx - rx),
+            "w": float(rx * 2),
+            "text_align": "center",
+        },
+        line2.id: {
+            "y": float(cy + 4),
+            "x": float(cx - rx),
+            "w": float(rx * 2),
+            "text_align": "center",
+        },
+    }
+
+    new_elements = []
+    for el in ir.elements:
+        if el.id in targets:
+            updates = targets[el.id]
+            log.info(
+                "Badge text '%s' y corrected: %d → %d",
+                el.content or el.id, int(el.y), int(updates["y"]),
+            )
+            el = el.model_copy(update=updates)
+        new_elements.append(el)
+
+    return ir.model_copy(update={"elements": new_elements})
+
+
+def _fix_label_text_position(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
+    """Vertically centre label-row text (e.g. BREAKING NEWS) within the label row."""
+    new_elements = []
+    for el in ir.elements:
+        if (
+            el.type == "text"
+            and brand.bar_y <= el.y <= brand.bar_y_ticker
+            and "badge" not in el.id.lower()
+            and not el.repeat_content
+        ):
+            font_size = el.font_size or 28
+            # Pango's show_layout treats (x, y) as the layout top-left.
+            # For Noto Sans Bold:   ascent ≈ 0.92·fs,  cap_height ≈ 0.72·fs.
+            # We want the visible cap-block centred in the label row, i.e.
+            #   cap_center = bar_center
+            #   layout_top + ascent - cap_h/2 = bar_y + row_h/2
+            # → layout_top = bar_y + row_h/2 - (0.92 - 0.36)·fs
+            #              = bar_y + row_h/2 - 0.56·fs
+            # Then nudge upward by LABEL_TEXT_BOTTOM_OFFSET so the glyphs leave
+            # visible breathing room above the label-row separator.
+            centred_y = (
+                brand.bar_y
+                + brand.label_row_h // 2
+                - int(font_size * 0.56)
+                - LABEL_TEXT_BOTTOM_OFFSET
+            )
+            # Enforce a left padding so the text never crowds the badge circle.
+            min_x = int(brand.circle_cx + brand.circle_rx + LABEL_TEXT_LEFT_PADDING)
+            new_x = max(int(el.x), min_x)
+            if int(el.y) != centred_y or int(el.x) != new_x:
+                log.info(
+                    "Label text '%s' corrected: x=%d→%d y=%d→%d",
+                    el.id, int(el.x), new_x, int(el.y), centred_y,
+                )
+                el = el.model_copy(update={"x": float(new_x), "y": float(centred_y)})
+        new_elements.append(el)
+    return ir.model_copy(update={"elements": new_elements})
 
 
 def _fix_ticker_row_position(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
@@ -108,7 +237,7 @@ def _fix_ticker_row_position(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
     if not ticker_elements:
         return ir
 
-    scroll_y = float(brand.bar_y + brand.bar_h // 2)
+    scroll_y = float(brand.bar_y_ticker)
     element_map = {el.id: el for el in ir.elements}
     new_elements = list(ir.elements)
 
@@ -122,7 +251,7 @@ def _fix_ticker_row_position(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
         if float(ticker_rect.y or 0) >= scroll_y - 5:
             continue
         # Full-height bar: leave it for _ensure_ticker_scroll_bar to handle.
-        if float(ticker_rect.h or 0) > brand.bar_h // 2 + 5:
+        if float(ticker_rect.h or 0) > brand.ticker_row_h + 5:
             continue
 
         # Label row rect: the topmost non-ticker rect in the bar zone.
@@ -151,6 +280,30 @@ def _fix_ticker_row_position(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
     return ir.model_copy(update={"elements": new_elements})
 
 
+_SEPARATOR_ID   = "separator"
+_SEPARATOR_FILL = "#1A1A2E"
+_SEPARATOR_H    = 2
+
+
+def _ensure_separator_line(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
+    """Guarantee a 2px dark separator line exists at bar_y_ticker spanning full canvas width."""
+    if any(el.id == _SEPARATOR_ID for el in ir.elements):
+        return ir
+
+    separator = ElementDef(
+        id=_SEPARATOR_ID,
+        type="rect",
+        x=0,
+        y=float(brand.bar_y_ticker),
+        w=float(brand.canvas_w),
+        h=float(_SEPARATOR_H),
+        fill=_SEPARATOR_FILL,
+        opacity=1.0,
+    )
+    log.info("Inserted separator line at y=%d", brand.bar_y_ticker)
+    return ir.model_copy(update={"elements": list(ir.elements) + [separator]})
+
+
 def _ensure_ticker_scroll_bar(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
     """Guarantee every scrolling ticker element has a pure-white scroll bar.
 
@@ -174,8 +327,8 @@ def _ensure_ticker_scroll_bar(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
     if not ticker_elements:
         return ir
 
-    scroll_y = float(brand.bar_y + brand.bar_h // 2)
-    scroll_h = float(brand.bar_h - brand.bar_h // 2)  # handles odd bar_h
+    scroll_y = float(brand.bar_y_ticker)
+    scroll_h = float(brand.ticker_row_h)
 
     element_map: dict[str, ElementDef] = {el.id: el for el in ir.elements}
     new_elements = list(ir.elements)
@@ -204,6 +357,8 @@ def _ensure_ticker_scroll_bar(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
         if (existing_sb.x or 0.0) < _BADGE_WIDTH:
             updates["x"] = _BADGE_WIDTH
             updates["w"] = expected_w
+        if (existing_sb.h or 0.0) != scroll_h:
+            updates["h"] = scroll_h
         if updates:
             fixed = existing_sb.model_copy(update=updates)
             new_elements = [fixed if e.id == existing_sb.id else e for e in new_elements]
@@ -231,7 +386,7 @@ def _ensure_ticker_scroll_bar(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
     # (e.g. 400px + 300px), the rest of the upper row is transparent and looks
     # disconnected from the full-width white scroll_bar below.
     upper_y = float(brand.bar_y)
-    upper_h = float(brand.bar_h // 2)
+    upper_h = float(brand.label_row_h)
     upper_w = float(brand.canvas_w) - _BADGE_WIDTH
     has_upper_bg = any(
         e.type == "rect"
@@ -314,7 +469,7 @@ def _fix_clip_target_dimensions(ir: MotionIR, brand: ResolvedBrand) -> MotionIR:
     if not clip_ids:
         return ir
 
-    half_h = float(brand.bar_h // 2)
+    half_h = float(brand.label_row_h)
     full_h = float(brand.bar_h)
 
     new_elements = list(ir.elements)

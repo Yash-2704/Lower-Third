@@ -130,3 +130,20 @@ def test_path_element_with_d_constructs():
 def test_path_element_with_neither_raises():
     with pytest.raises(ValidationError):
         ElementDef(id="bad", type="path", fill="#000000")
+
+
+# ── text_align field tests ────────────────────────────────────────────────────
+
+def test_text_align_default_is_left():
+    el = ElementDef(id="t", type="text", content="X", fill="#FFFFFF")
+    assert el.text_align == "left"
+
+
+def test_text_align_center_constructs():
+    el = ElementDef(id="t", type="text", content="X", fill="#FFFFFF", text_align="center")
+    assert el.text_align == "center"
+
+
+def test_text_align_invalid_raises():
+    with pytest.raises(ValidationError):
+        ElementDef(id="t", type="text", content="X", fill="#FFFFFF", text_align="invalid")

@@ -12,7 +12,7 @@ from lower_third.motion.ticker_corrector import correct_ticker_widths
 from lower_third.motion.interpolation_engine import InterpolationEngine
 from lower_third.renderer import render
 from lower_third.renderer.ffmpeg_encoder import encode_to_webm
-from lower_third.cache.template_cache import cache_hit, cache_write
+from lower_third.cache.template_cache import cache_hit, cache_key, cache_write, PIPELINE_VERSION
 from lower_third.qc.validator import validate
 from lower_third.output.manifest_writer import write_manifest
 
@@ -74,7 +74,10 @@ def generate_lower_third(
     cached_path = cache_hit(spec)
     _progress("cache_check")
     if cached_path:
-        log.info("Cache hit for %s", spec.instance_id)
+        log.info(
+            "CACHE HIT [v%s]: returning cached result. Key: %s. File: %s",
+            PIPELINE_VERSION, cache_key(spec), cached_path,
+        )
         video_path = output_dir / f"{spec.instance_id}.webm"
         shutil.copy(cached_path, video_path)
         _progress("geometry")
@@ -123,6 +126,7 @@ def generate_lower_third(
 
     # Step 9 — Cache write
     cache_write(spec, video_path)
+    log.info("CACHE WRITE [v%s]: stored result. Key: %s", PIPELINE_VERSION, cache_key(spec))
 
     # Step 10 — QC
     qc_report = validate(video_path, spec, project_fps, frames_dir=frames_dir)

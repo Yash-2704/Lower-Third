@@ -32,7 +32,7 @@ For text entering from ABOVE the bar (slide-down entry):
 
 For text exiting BELOW the bar:
   final y = bar_y + bar_h + 60
-repeat_content = true only for continuous ticker scroll (text_x_offset track).
+repeat_content = false always. Never set repeat_content to true. The ticker content string is scrolled exactly once per loop cycle. The loop restart creates the appearance of continuous motion — the content string must not duplicate itself.
 
 PROPERTIES YOU MAY ANIMATE:
   x, y           — position in canvas pixels
@@ -111,6 +111,23 @@ Use these values for a standard lower third circle badge:
   ry = 60
 Never place a circle badge with cy > 1050 — it will be clipped by the canvas bottom edge.
 
+CIRCLE BADGE TEXT RULE:
+Text elements inside a circle badge MUST follow these rules:
+  - x = circle left edge (cx - rx). For the standard badge: x = 0.
+  - w = circle diameter (rx * 2). For the standard badge: w = 120.
+  - text_align = "center" — ALWAYS, never omit. Without this field Pango left-aligns
+    the text and it will not be centred in the circle regardless of x.
+  - font_size = scale proportionally to circle size.
+    For a 120px diameter circle: font_size 14–18px (use 16 as default).
+    For a 160px diameter circle: font_size 18–22px.
+    Never use font_size > 20 inside a 120px circle — glyphs will overflow.
+  - Two stacked lines: line1 y = cy - (font_size * 0.6)
+                       line2 y = cy + (font_size * 0.6)
+    For the standard badge (cy=1012, font_size=16): line1 y=1002, line2 y=1022.
+  - Never set clip_to on badge text elements. Badge text elements do not use clip_to — the text is positioned to sit visually inside the circle without clipping. clip_to is only valid when targeting rect elements.
+  - Never set text_align to "left" for badge text.
+  - Never omit w on badge text elements.
+
 SHAPES — for circular or decorative badges use type="path" with shape_intent:
   Supported kinds: circle, ellipse, triangle, diamond, star, pill, chevron, pentagon, hexagon
   shape_intent fields: kind (required), cx, cy, rx, ry (all required), points (star only), corner_r (pill only)
@@ -159,6 +176,12 @@ OUTPUT SCHEMA:
     "total_ms": int
   }}
 }}
+
+TEXT ELEMENT OPTIONAL FIELDS:
+  "text_align": "left"   // optional: "left", "center", "right". Default is "left".
+                         // Use "center" for text inside circle badges.
+                         // When set to "center", the layout width is derived from the
+                         // element's "w" field (or 120px for badge circles if w is absent).
 Do not include instance_id or schema_version — these are set by the system.
 
 CRITICAL: The examples below show structure only.
@@ -228,11 +251,11 @@ Never omit the text_x_offset track for ticker elements.
 
 TWO-ROW TICKER LAYOUT — when the design has a label/headline bar ABOVE a scrolling ticker row:
   Label row  : x=0, y={bar_y},        w={canvas_w}, h={bar_half_h}
-  Ticker row : x=0, y={bar_y_lower},  w={canvas_w}, h={bar_half_h}
+  Ticker row : x=0, y={bar_y_lower},  w={canvas_w}, h={ticker_row_h}
   The ticker background rect MUST use y={bar_y_lower}, NOT y={bar_y}.
   The ticker text clip_to MUST reference the ticker row rect (the one at y={bar_y_lower}).
   NEVER place the ticker row rect at the same y as the label row rect.
-  Each row is {bar_half_h}px tall. The two rows together fill the full bar zone.
+  The label row is {bar_half_h}px tall. The ticker row is {ticker_row_h}px tall (taller to prevent text descender clipping).
 
 EXAMPLE 2 — Continuous ticker crawl (two statements, infinite loop):
 
@@ -248,7 +271,7 @@ EXAMPLE 2 — Continuous ticker crawl (two statements, infinite loop):
       {{"id": "bar", "type": "rect", "x": 0, "y": {bar_y}, "w": {canvas_w}, "h": {bar_h}, "fill": "{bar_color}"}},
       {{"id": "ticker", "type": "text",
        "content": "Statement one here  \u25cf  Statement two here  \u25cf  ",
-       "repeat_content": true,
+       "repeat_content": false,
        "x": {canvas_w}, "y": {bar_center_headline},
        "fill": "{text_color}", "font_size": {font_size_headline}, "clip_to": "bar"}}
     ],
@@ -300,7 +323,7 @@ Layout:
       }},
       {{
         "id": "scroll_bar", "type": "rect",
-        "x": 0, "y": {bar_y_lower}, "w": {canvas_w}, "h": {bar_half_h},
+        "x": 0, "y": {bar_y_lower}, "w": {canvas_w}, "h": {ticker_row_h},
         "fill": "#FFFFFF", "opacity": 1.0
       }},
       {{
@@ -321,17 +344,17 @@ Layout:
       }},
       {{
         "id": "badge_line1", "type": "text",
-        "content": "<<USER_BADGE_LINE_1>>",
-        "x": 12, "y": {bar_y_mid_upper},
-        "fill": "#FFFFFF", "font_size": {font_size_badge},
-        "font_weight": "bold"
+        "content": "LIVE",
+        "x": 0, "y": 1002, "w": 120,
+        "fill": "#FFFFFF", "font_size": 16,
+        "font_weight": "bold", "text_align": "center"
       }},
       {{
         "id": "badge_line2", "type": "text",
-        "content": "<<USER_BADGE_LINE_2>>",
-        "x": 12, "y": {bar_y_mid_lower},
-        "fill": "#FFFFFF", "font_size": {font_size_badge},
-        "font_weight": "bold"
+        "content": "NEWS",
+        "x": 0, "y": 1022, "w": 120,
+        "fill": "#FFFFFF", "font_size": 16,
+        "font_weight": "bold", "text_align": "center"
       }}
     ],
     "tracks": [

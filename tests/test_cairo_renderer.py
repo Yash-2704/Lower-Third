@@ -313,3 +313,47 @@ def test_gradient_pillow_rect_creates_png():
         assert out.exists()
         img = Image.open(out)
         assert img.size == (1920, 1080)
+
+
+def test_draw_frame_text_align_center_renders():
+    _cairo_skip()
+    from lower_third.renderer.cairo_renderer import draw_frame
+    state = DrawState(elements=[{
+        "id": "badge_text", "type": "text",
+        "content": "LIVE",
+        "x": 0.0, "y": 960.0, "w": 120.0, "h": 60.0,
+        "opacity": 1.0, "fill": "#FFFFFF",
+        "scale_x": 1.0, "scale_y": 1.0, "rotation": 0.0,
+        "clip_to": None,
+        "content": "LIVE",
+        "repeat_content": False,
+        "font_size": 24, "font_weight": "bold",
+        "text_x_offset": 0.0,
+        "text_align": "center",
+    }])
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = Path(tmpdir) / "center.png"
+        draw_frame(state, out)
+        assert out.exists()
+        assert out.stat().st_size > 0
+
+
+def test_draw_frame_text_align_left_default_renders():
+    _cairo_skip()
+    from lower_third.renderer.cairo_renderer import draw_frame
+    state = DrawState(elements=[{
+        "id": "label", "type": "text",
+        "content": "BREAKING NEWS",
+        "x": 140.0, "y": 948.0, "w": 0.0, "h": 0.0,
+        "opacity": 1.0, "fill": "#FFFFFF",
+        "scale_x": 1.0, "scale_y": 1.0, "rotation": 0.0,
+        "clip_to": None,
+        "repeat_content": False,
+        "font_size": 32, "font_weight": "bold",
+        "text_x_offset": 0.0,
+    }])
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = Path(tmpdir) / "left.png"
+        draw_frame(state, out)
+        assert out.exists()
+        assert out.stat().st_size > 0

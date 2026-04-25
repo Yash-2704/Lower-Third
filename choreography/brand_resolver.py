@@ -13,6 +13,9 @@ STYLE_COLOUR_MAP: dict[str, str] = {
 DEFAULT_BAR_COLOUR  = "#1A1A2E"
 DEFAULT_TEXT_COLOUR = "#FFFFFF"
 
+LABEL_ROW_H: int = 56   # minimum height for BREAKING NEWS / label row
+TICKER_ROW_H: int = 80  # scrolling ticker row height (unchanged)
+
 _CONSTANTS_PATH = (
     Path(__file__).resolve().parent.parent / "config" / "module_constants.json"
 )
@@ -33,6 +36,14 @@ class ResolvedBrand:
     font_size_kicker:   int
     font_size_name:     int
     font_size_title:    int
+    ticker_row_h:       int = TICKER_ROW_H
+    label_row_h:        int = LABEL_ROW_H
+    bar_y_ticker:       int = 0   # bar_y + label_row_h
+    bar_centre_label:   int = 0   # bar_y + label_row_h // 2
+    circle_cx:          int = 60
+    circle_cy:          int = 0   # bar_y + (canvas_h - bar_y) // 2
+    circle_rx:          int = 60
+    circle_ry:          int = 60
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
@@ -80,13 +91,10 @@ def resolve_brand(
     avoid = upstream_signals.get("anchor_avoid_zone", {"x": 0, "y": 0, "w": 0, "h": 0})
     anchor_avoid_zone_bottom = int(avoid.get("y", 0)) + int(avoid.get("h", 0))
 
-    bar_h = (
-        constants["bar_base_height_px"]
-        + (estimated_lines - 1) * constants["bar_height_per_line"]
-    )
+    bar_h = LABEL_ROW_H + TICKER_ROW_H  # 56 + 80 = 136
 
     bar_y = max(
-        canvas_h - bar_h - constants["bar_bottom_margin"],
+        canvas_h - bar_h,
         anchor_avoid_zone_bottom + 20,
     )
 
@@ -110,4 +118,12 @@ def resolve_brand(
         font_size_kicker=constants["font_size_kicker"],
         font_size_name=constants["font_size_name"],
         font_size_title=constants["font_size_title"],
+        ticker_row_h=TICKER_ROW_H,
+        label_row_h=LABEL_ROW_H,
+        bar_y_ticker=bar_y + LABEL_ROW_H,
+        bar_centre_label=bar_y + LABEL_ROW_H // 2,
+        circle_cx=60,
+        circle_cy=bar_y + (canvas_h - bar_y) // 2,
+        circle_rx=60,
+        circle_ry=60,
     )

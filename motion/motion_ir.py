@@ -153,6 +153,7 @@ class ElementDef(BaseModel):
     d: str | None = None
     gradient: GradientDef | None = None
     ticker_items: list[TickerItem] | None = None
+    text_align: Literal["left", "center", "right"] = "left"
 
     @field_validator("fill")
     @classmethod

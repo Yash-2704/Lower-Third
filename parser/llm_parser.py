@@ -42,23 +42,18 @@ def _load_system_prompt(brand: ResolvedBrand) -> str:
         bar_center_headline=brand.bar_y + brand.bar_padding_top,
         bar_above_headline=brand.bar_y - brand.font_size_headline - brand.bar_padding_top,
         # example 3 geometry (two-row lower-third with circle badge)
-        bar_half_h=brand.bar_h // 2,
-        bar_y_lower=brand.bar_y + brand.bar_h // 2,
-        bar_y_mid=brand.bar_y + brand.bar_h // 2,
-        bar_center_ticker=(
-            brand.bar_y + brand.bar_h // 2
-            + brand.bar_padding_top
-        ),
+        bar_half_h=brand.label_row_h,
+        bar_y_lower=brand.bar_y_ticker,
+        bar_y_mid=brand.bar_y + (brand.canvas_h - brand.bar_y) // 2,
+        ticker_row_h=brand.ticker_row_h,
+        bar_center_ticker=brand.bar_y_ticker + brand.bar_padding_top,
         # badge text: two lines centred vertically inside the circle
         font_size_badge=max(14, brand.bar_h // 5),
         bar_y_mid_upper=(
-            brand.bar_y + brand.bar_h // 2
+            brand.bar_y_ticker
             - brand.bar_h // 5  # one line above badge centre
         ),
-        bar_y_mid_lower=(
-            brand.bar_y + brand.bar_h // 2
-            + 2  # one line below badge centre
-        ),
+        bar_y_mid_lower=brand.bar_y_ticker + 2,
     )
 
 
